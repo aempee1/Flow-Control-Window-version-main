@@ -7,9 +7,9 @@ vector<double> flowData;
 //-----------------------------
 // เพิ่มค่าเริ่มต้นของ PID Controller 
 //const double Kp = 0.007981535232; // for voltage control
-const double Kp = 8.2111224966416e-4; // for current control
+const double Kp = 9.03223474630576e-4; // for current control
 const double Ki = 0.0271542857142857; // 0.000047 - 0.000049
-const double Kd = 0.0019875459404022;
+const double Kd = 0.0020869232374223;
 double integral = 0.0;
 double previousError = 0.0;
 double pidOutput = 0.3 ;
@@ -234,11 +234,6 @@ void ManualCalibrationDialog::OnUpdateDisplayTimer(wxTimerEvent& event) {
         return;
     }
     // คำนวณค่าเฉลี่ย Moving Average
-    float sum = accumulate(valueBuffer.begin(), valueBuffer.end(), 0.0f);
-    float movingAverage = sum / valueBuffer.size();
-    // แสดงผลค่าเฉลี่ยที่คำนวณได้
-    refFlowInput->SetValue(wxString::Format("%.2f", movingAverage));
-    UpdateGraph(movingAverage); // อัปเดตกราฟ
 }
 //----------------------------------------------------------------------------------------------------------------------------------
 void ManualCalibrationDialog::UpdateGraph(float flow) {
