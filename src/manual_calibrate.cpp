@@ -6,47 +6,15 @@ vector<double> setpointData;
 vector<double> flowData;
 //-----------------------------
 // เพิ่มค่าเริ่มต้นของ PID Controller 
-const double Kp = 0.007981535232;
-const double Ki = 0.0205714285714286; // 0.000047 - 0.000049
-const double Kd = 0.0;
+//const double Kp = 0.007981535232; // for voltage control
+const double Kp = 8.2111224966416e-4; // for current control
+const double Ki = 0.0271542857142857; // 0.000047 - 0.000049
+const double Kd = 0.0019875459404022;
 double integral = 0.0;
 double previousError = 0.0;
-double pidOutput = 10 ;
+double pidOutput = 0.3 ;
 io_service io; // iner loop ,fee foward
-//-----------------------------
-double ManualCalibrationDialog::calculatePID(double setpointValue, double currentValue) {
-    // คำนวณ Error
-    double errorValue = setpointValue - currentValue;
-    // คำนวณ Derivative
-    double derivativeValue = errorValue - previousError;
-    // อัปเดต Error ก่อนหน้า
-    previousError = errorValue;
-    // คำนวณ PID Output
-    double PID_output = (Kp * errorValue) + (Ki * integral) + (Kd * derivativeValue);
-    return PID_output;
-}
-void ManualCalibrationDialog::OnDoneButtonClick(wxCommandEvent& event) {
-    // สร้างไฟล์ CSV
-    ofstream outFile("flow_data.csv");
-    if (!outFile.is_open()) {
-        wxMessageBox("Unable to open file for writing.", "Error", wxOK | wxICON_ERROR, this);
-        return;
-    }
-
-    // เขียนหัวข้อในไฟล์ CSV
-    outFile << "Timestamp,Flow\n";
-
-    // เขียนข้อมูล flow ลงในไฟล์ CSV
-    double timestamp = 0;
-    for (double flow : flowData) {
-        outFile << timestamp++ << "," << flow << "\n";
-    }
-
-    outFile.close();
-    wxMessageBox("Data exported successfully!", "Success", wxOK | wxICON_INFORMATION, this);
-    // ปิด dialog
-    EndModal(wxID_OK);
-}
+//----------------------------------------------------------------------------------------------------------------------------------
 serial_port ManualCalibrationDialog::InitialSerial(io_service& io, const string& port_name)
 {
     serial_port serial(io, port_name);
@@ -106,6 +74,56 @@ bool ManualCalibrationDialog::CheckAndLoadPorts(const string& fileName, vector<s
     // cout << "Ports loaded successfully." << endl;  // เพิ่ม log message
     return true;
 }
+//----------------------------------------------------------------------------------------------------------------------------------
+double ManualCalibrationDialog::calculatePID(double setpointValue, double currentValue) {
+    // คำนวณ Error
+    double errorValue = setpointValue - currentValue;
+    // คำนวณ Derivative
+    double derivativeValue = errorValue - previousError;
+    // อัปเดต Error ก่อนหน้า
+    previousError = errorValue;
+    // คำนวณ PID Output
+    double PID_output = (Kp * errorValue) + (Ki * integral) + (Kd * derivativeValue);
+    return PID_output;
+}
+//----------------------------------------------------------------------------------------------------------------------------------
+void ManualCalibrationDialog::OnDoneButtonClick(wxCommandEvent& event) {
+    // สร้างไฟล์ CSV
+    ofstream outFile("flow_data.csv");
+    if (!outFile.is_open()) {
+        wxMessageBox("Unable to open file for writing.", "Error", wxOK | wxICON_ERROR, this);
+        return;
+    }
+
+    // เขียนหัวข้อในไฟล์ CSV
+    outFile << "Timestamp,Flow\n";
+
+    // เขียนข้อมูล flow ลงในไฟล์ CSV
+    double timestamp = 0;
+    for (double flow : flowData) {
+        outFile << timestamp++ << "," << flow << "\n";
+    }
+
+    outFile.close();
+    wxMessageBox("Data exported successfully!", "Success", wxOK | wxICON_INFORMATION, this);
+    // ปิด dialog
+    EndModal(wxID_OK);
+}
+void ManualCalibrationDialog::OnSetButtonClick(wxCommandEvent& event) {
+    wxString inputStr = setFlowInput->GetValue();
+    long value;
+    if (inputStr.ToLong(&value)) {
+        setpoint = static_cast<int>(value);
+        // เริ่มทำงาน timer สำหรับสุ่มค่า
+        if (!timer->IsRunning()) {
+            timer->Start(500); // ทำงานทุก 500 miliseconds
+        }
+    }
+    else {
+        wxMessageBox("Invalid input. Please enter an integer value.", "Error", wxOK | wxICON_ERROR, this);
+    }
+}
+//----------------------------------------------------------------------------------------------------------------------------------
 ManualCalibrationDialog::ManualCalibrationDialog(wxWindow *parent)
     : wxDialog(parent, wxID_ANY, "Manual Calibration", wxDefaultPosition, wxSize(800, 800), wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER),
       setpoint(0), timer(new wxTimer(this)), modbusReadTimer(new wxTimer(this)),
@@ -181,6 +199,22 @@ ManualCalibrationDialog::ManualCalibrationDialog(wxWindow *parent)
     modbusReadTimer->Start(50);  // อ่านค่าทุก 50 ms
     updateDisplayTimer->Start(500); // แสดงผลทุก 500 ms
 }
+ManualCalibrationDialog::~ManualCalibrationDialog() {
+    if (timer->IsRunning()) {
+        timer->Stop();
+    }
+    if (modbusCtx) {
+        modbus_close(modbusCtx);
+        modbus_free(modbusCtx);
+    }
+    delete modbusReadTimer;
+    delete updateDisplayTimer;
+    if (serialCtx.is_open()) {
+        serialCtx.close();
+    }
+    delete timer;
+}
+//----------------------------------------------------------------------------------------------------------------------------------
 void ManualCalibrationDialog::OnModbusReadTimer(wxTimerEvent& event) {
     uint16_t refFlow[4];
     int rc = modbus_read_registers(modbusCtx, 6, 2, refFlow);
@@ -206,21 +240,7 @@ void ManualCalibrationDialog::OnUpdateDisplayTimer(wxTimerEvent& event) {
     refFlowInput->SetValue(wxString::Format("%.2f", movingAverage));
     UpdateGraph(movingAverage); // อัปเดตกราฟ
 }
-ManualCalibrationDialog::~ManualCalibrationDialog() {
-    if (timer->IsRunning()) {
-        timer->Stop();
-    }
-    if (modbusCtx) {
-        modbus_close(modbusCtx);
-        modbus_free(modbusCtx);
-    }
-    delete modbusReadTimer;
-    delete updateDisplayTimer;
-    if (serialCtx.is_open()) {
-        serialCtx.close();
-    }
-    delete timer;
-}
+//----------------------------------------------------------------------------------------------------------------------------------
 void ManualCalibrationDialog::UpdateGraph(float flow) {
     // Update X and Y data
     double currentTime = xData.empty() ? 0 : xData.back() + 1;
@@ -244,19 +264,6 @@ void ManualCalibrationDialog::UpdateGraph(float flow) {
     graphWindow->Fit(); // ปรับมุมมองกราฟให้พอดี
     graphWindow->Refresh();
 }
-void ManualCalibrationDialog::OnSetButtonClick(wxCommandEvent &event) {
-    wxString inputStr = setFlowInput->GetValue();
-    long value;
-    if (inputStr.ToLong(&value)) {
-        setpoint = static_cast<int>(value);
-        // เริ่มทำงาน timer สำหรับสุ่มค่า
-        if (!timer->IsRunning()) {
-			timer->Start(500); // ทำงานทุก 500 miliseconds
-        }
-    } else {
-        wxMessageBox("Invalid input. Please enter an integer value.", "Error", wxOK | wxICON_ERROR, this);
-    }
-}
 void ManualCalibrationDialog::OnTimer(wxTimerEvent &event) {
     uint16_t refFlow[4] ;
     int rc ;
@@ -279,13 +286,14 @@ void ManualCalibrationDialog::OnTimer(wxTimerEvent &event) {
     // คำนวณค่า Act. Flow โดยใช้ PID
     pidOutput += calculatePID(setpoint, refFlowValue);
     // ป้องกันค่า PID Output เกินขอบเขตที่กำหนด
-    if (pidOutput > 40) {
-        pidOutput = 40;
-    }
-    else if (pidOutput < 10) {
-        pidOutput = 10;
-    }
-    set_voltage(serialCtx, pidOutput);
+    if (pidOutput > 1.5) {
+        pidOutput = 1.5;
+	}
+	else if (pidOutput < 0.3) {
+		pidOutput = 0.3;
+	}
+
+    set_current(serialCtx, pidOutput);
     // เพิ่มค่าใหม่ใน Buffer
     valueBuffer.push_back(refFlowValue);
     if (valueBuffer.size() > BUFFER_SIZE) {
@@ -296,9 +304,18 @@ void ManualCalibrationDialog::OnTimer(wxTimerEvent &event) {
     float sum = accumulate(valueBuffer.begin(), valueBuffer.end(), 0.0f);
     float movingAverage = sum / valueBuffer.size();
 
+    flowData.push_back(refFlowValue); // เก็บค่า flow
+    ofstream outFile("flow_data.csv", ios::app); // Append ข้อมูลลงในไฟล์
+    if (outFile.is_open()) {
+        outFile << std::fixed << std::setprecision(1) << "Real-time," << refFlowValue << "\n";
+        outFile.close();
+    }
+
     // อัปเดตกราฟด้วยค่าเฉลี่ย
     UpdateGraph(movingAverage);
 }
+
+
 // Bind Event Table
 wxBEGIN_EVENT_TABLE(ManualCalibrationDialog, wxDialog)
     EVT_TIMER(wxID_ANY, ManualCalibrationDialog::OnTimer)
