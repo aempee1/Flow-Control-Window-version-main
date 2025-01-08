@@ -1,14 +1,21 @@
 #include "comport_setting.hpp"
-
 #ifdef _WIN32
 #include <windows.h>
+#include <winrt/Windows.Devices.Bluetooth.Advertisement.h>
+#include <winrt/Windows.Foundation.h>
+#include <functional>
 #endif
-
 #ifdef __APPLE__
 #include <dirent.h>
 #include <regex>
 #endif
-
+#ifdef _WIN32
+using namespace winrt;
+using namespace winrt::Windows::Devices::Bluetooth;
+using namespace winrt::Windows::Devices::Enumeration;
+using namespace winrt::Windows::Devices::Bluetooth::Advertisement;
+using namespace winrt::Windows::Foundation;
+#endif 
 using namespace std;
 using namespace boost::asio;
 
@@ -30,12 +37,10 @@ serial_port ComportSettingsDialog::InitialSerial(io_service& io, const string& p
     // cout << "Successfully initialized Serial on port: " << port_name << endl;
     return serial;
 }
-
 modbus_t* ComportSettingsDialog::InitialModbus(const char* modbus_port) {
     modbus_t* ctx = initialize_modbus(modbus_port);
     return ctx;
 }
-
 vector<string> ComportSettingsDialog::FetchAvailablePorts() {
     vector<string> ports;
 
@@ -67,32 +72,25 @@ vector<string> ComportSettingsDialog::FetchAvailablePorts() {
 
     return ports;
 }
-
-// Other includes and namespace remain unchanged
-
 void ComportSettingsDialog::SaveSelectedPorts() {
     ofstream outFile("properties.txt");
-    outFile << selectedBleAgentPort << endl;
     outFile << selectedModbusPort << endl;
     outFile << selectedPowerSupplyPort << endl;
     outFile.close();
 }
-
 void ComportSettingsDialog::LoadSelectedPorts() {
     ifstream inFile("properties.txt");
     if (inFile) {
-        getline(inFile, selectedBleAgentPort);
         getline(inFile, selectedModbusPort);
         getline(inFile, selectedPowerSupplyPort);
         inFile.close();
     }
 }
-
 ComportSettingsDialog::ComportSettingsDialog(wxWindow* parent)
     : wxDialog(parent, wxID_ANY, "Comport Settings", wxDefaultPosition, wxSize(500, 200), wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER)
 {
     LoadSelectedPorts();
-
+    //FetchBLEDevices();
     wxBoxSizer* mainSizer = new wxBoxSizer(wxVERTICAL);
     wxFlexGridSizer* gridSizer = new wxFlexGridSizer(3, 3, 10, 10);
 
@@ -103,16 +101,6 @@ ComportSettingsDialog::ComportSettingsDialog(wxWindow* parent)
     baudRates.Add("38400");
     baudRates.Add("57600");
     baudRates.Add("115200");
-
-    // BLEAgent Label และ Choice
-    gridSizer->Add(new wxStaticText(this, wxID_ANY, "BLEAgent:"), 0, wxALIGN_CENTER_VERTICAL | wxALIGN_CENTER_HORIZONTAL);
-    wxChoice* bleAgentChoice = new wxChoice(this, wxID_ANY);
-    for (const auto& port : availablePorts) {
-        bleAgentChoice->Append(port);
-    }
-    bleAgentChoice->SetStringSelection(selectedBleAgentPort);
-    gridSizer->Add(bleAgentChoice, 1, wxALIGN_CENTER_HORIZONTAL);
-    gridSizer->AddSpacer(1); // Empty column for BLEAgent row
 
     // Modbus Label และ Choice
     gridSizer->Add(new wxStaticText(this, wxID_ANY, "Modbus:"), 0, wxALIGN_CENTER_VERTICAL | wxALIGN_CENTER_HORIZONTAL);
@@ -141,12 +129,18 @@ ComportSettingsDialog::ComportSettingsDialog(wxWindow* parent)
     gridSizer->Add(powerSupplyBaudChoice, 1, wxALIGN_CENTER_HORIZONTAL);
 
     mainSizer->Add(gridSizer, 1, wxALL | wxALIGN_CENTER, 10);
+    // Create the OK and Cancel buttons in a horizontal row
+    wxBoxSizer* buttonSizer = new wxBoxSizer(wxHORIZONTAL);
 
     wxButton* okButton = new wxButton(this, wxID_OK, "OK");
-    mainSizer->Add(okButton, 0, wxALL | wxALIGN_CENTER, 10);
+    buttonSizer->Add(okButton, 0, wxALL | wxALIGN_CENTER, 10);
 
-    okButton->Bind(wxEVT_BUTTON, [this, bleAgentChoice, modbusChoice, powerSupplyChoice, modbusBaudChoice, powerSupplyBaudChoice](wxCommandEvent& event) {
-        selectedBleAgentPort = bleAgentChoice->GetStringSelection().ToStdString();
+    wxButton* cancelButton = new wxButton(this, wxID_CANCEL, "Cancel");
+    buttonSizer->Add(cancelButton, 0, wxALL | wxALIGN_CENTER, 10);
+
+    mainSizer->Add(buttonSizer, 0, wxALL | wxALIGN_CENTER, 10);
+
+    okButton->Bind(wxEVT_BUTTON, [this, modbusChoice, powerSupplyChoice, modbusBaudChoice, powerSupplyBaudChoice](wxCommandEvent& event) {
         selectedModbusPort = modbusChoice->GetStringSelection().ToStdString();
         selectedPowerSupplyPort = powerSupplyChoice->GetStringSelection().ToStdString();
         selectedModbusBaudRate = stoi(modbusBaudChoice->GetStringSelection().ToStdString());
@@ -189,11 +183,6 @@ ComportSettingsDialog::ComportSettingsDialog(wxWindow* parent)
         executeCommand(cmd_power_supply);
 
 #endif 
-
-        // wxLogMessage("BLEAgent Port: %s", selectedBleAgentPort);
-        // wxLogMessage("Modbus Port: %s", selectedModbusPort);
-        // wxLogMessage("Power Supply Port: %s", selectedPowerSupplyPort);
-
         if (modbusContext) {
             wxLogMessage("Modbus and Serial initialized successfully.");
         }
@@ -207,7 +196,13 @@ ComportSettingsDialog::ComportSettingsDialog(wxWindow* parent)
         }
 
         this->EndModal(wxID_OK);
+        }
+    );
+    cancelButton->Bind(wxEVT_BUTTON, [this](wxCommandEvent& event) {
+        this->EndModal(wxID_CANCEL); // ปิดหน้าต่างโดยไม่บันทึกค่า
         });
+
+
 
     SetSizer(mainSizer);
     Layout();

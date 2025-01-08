@@ -8,6 +8,7 @@
 #include <wx/sizer.h>
 #include "manual_calibrate.hpp"
 #include "comport_setting.hpp"
+#include "ble_device_setting.hpp"
 
 // สร้างคลาสหลักสำหรับหน้าต่าง
 class MyFrame : public wxFrame {
@@ -19,6 +20,7 @@ private:
     void OnAboutSoftware(wxCommandEvent& event); // ฟังก์ชันสำหรับจัดการคลิกเมนู About
     void OnComportSettings(wxCommandEvent& event); // ฟังก์ชันสำหรับจัดการคลิกเมนู Comport Settings
     void OnManualFlowsystem(wxCommandEvent& event); //
+	void OnBLEDeviceSettings(wxCommandEvent& event); // ฟังก์ชันสำหรับจัดการคลิกเมนู BLEDevice Settings
     wxDECLARE_EVENT_TABLE();             // ประกาศ Event Table
 };
 

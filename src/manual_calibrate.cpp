@@ -3,7 +3,9 @@ using namespace std;
 using namespace boost::asio;
 //-----------------------------
 vector<double> setpointData;
-vector<double> flowData;
+vector<double> actData;
+vector<double> errorData;
+vector<double> refData;
 //-----------------------------
 // เพิ่มค่าเริ่มต้นของ PID Controller 
 //const double Kp = 0.007981535232; // for voltage control
@@ -36,20 +38,19 @@ modbus_t* ManualCalibrationDialog::InitialModbus(const char* modbus_port) {
     modbus_t* ctx = initialize_modbus(modbus_port);
     return ctx;
 }
-tuple<string, string, string> ReadPortsFromFile(const string& fileName) {
+tuple<string,string> ReadPortsFromFile(const string& fileName) {
     ifstream file(fileName);
     if (!file.is_open()) {
         throw runtime_error("Unable to open the port configuration file."); // โยนข้อผิดพลาดหากเปิดไฟล์ไม่ได้
     }
 
-    string bluetoothPort, modbusPort, serialPort;
-    getline(file, bluetoothPort);
+    string modbusPort, serialPort;
     getline(file, modbusPort);
     getline(file, serialPort);
-    if (bluetoothPort.empty() || modbusPort.empty() || serialPort.empty()) {
-        throw runtime_error("The port configuration file must contain at least 3 lines."); // โยนข้อผิดพลาดหากข้อมูลไม่ครบ
+    if ( modbusPort.empty() || serialPort.empty()) {
+        throw runtime_error("The port configuration file must contain at least 2 lines."); // โยนข้อผิดพลาดหากข้อมูลไม่ครบ
     }
-    return make_tuple(bluetoothPort, modbusPort, serialPort); // คืนค่าพอร์ตทั้งหมดในรูปแบบ tuple
+    return make_tuple(modbusPort, serialPort); // คืนค่าพอร์ตทั้งหมดในรูปแบบ tuple
 }
 bool ManualCalibrationDialog::CheckAndLoadPorts(const string& fileName, vector<string>& ports) {
     cout << "Attempting to open the file: " << fileName << endl;  // เพิ่ม log message
@@ -88,24 +89,54 @@ double ManualCalibrationDialog::calculatePID(double setpointValue, double curren
 }
 //----------------------------------------------------------------------------------------------------------------------------------
 void ManualCalibrationDialog::OnDoneButtonClick(wxCommandEvent& event) {
-    // สร้างไฟล์ CSV
-    ofstream outFile("flow_data.csv");
-    if (!outFile.is_open()) {
-        wxMessageBox("Unable to open file for writing.", "Error", wxOK | wxICON_ERROR, this);
-        return;
+    // แสดง dialog เพื่อถามผู้ใช้
+    wxMessageDialog confirmDialog(this,
+        "Do you want to save the log data?",
+        "Confirm Save",
+        wxYES_NO | wxNO_DEFAULT | wxICON_QUESTION);
+
+    // ตรวจสอบคำตอบของผู้ใช้
+    if (confirmDialog.ShowModal() == wxID_YES) {
+        // แสดง wxFileDialog เพื่อให้ผู้ใช้เลือกตำแหน่งและชื่อไฟล์
+        wxFileDialog saveFileDialog(this,
+            "Save Log File",
+            "", "",
+            "CSV files (*.csv)|*.csv",
+            wxFD_SAVE | wxFD_OVERWRITE_PROMPT);
+
+        if (saveFileDialog.ShowModal() == wxID_CANCEL) {
+            // ผู้ใช้ยกเลิกการบันทึก
+            return;
+        }
+
+        // ได้ path และชื่อไฟล์ที่ผู้ใช้เลือก
+        wxString filePath = saveFileDialog.GetPath();
+
+        // สร้างไฟล์ CSV
+        ofstream outFile(filePath.ToStdString());
+        if (!outFile.is_open()) {
+            wxMessageBox("Unable to open file for writing.", "Error", wxOK | wxICON_ERROR, this);
+            return;
+        }
+
+        // เขียนหัวข้อในไฟล์ CSV
+        outFile << "Timestamp,Reference Flow,Active Flow,Error\n";
+
+        // เขียนข้อมูล flow ลงในไฟล์ CSV
+        double timestamp = 0;
+        for (size_t i = 0; i < refData.size(); ++i) {
+
+            outFile << timestamp++ << ","         // Write timestamp
+                << refData[i] << ","                   // Write current value of refData
+                << actData[i] << ","                   // Write corresponding value of actData
+                << errorData[i] << ","                 // Write corresponding value of errorData
+                << setpoint << "\n";                    // Write setpoint (assumed constant for all rows)
+        }
+
+        outFile.close();
+        wxMessageBox("Data exported successfully!", "Success", wxOK | wxICON_INFORMATION, this);
     }
 
-    // เขียนหัวข้อในไฟล์ CSV
-    outFile << "Timestamp,Flow\n";
-
-    // เขียนข้อมูล flow ลงในไฟล์ CSV
-    double timestamp = 0;
-    for (double flow : flowData) {
-        outFile << timestamp++ << "," << flow << "\n";
-    }
-
-    outFile.close();
-    wxMessageBox("Data exported successfully!", "Success", wxOK | wxICON_INFORMATION, this);
     // ปิด dialog
     EndModal(wxID_OK);
 }
@@ -263,7 +294,7 @@ void ManualCalibrationDialog::OnTimer(wxTimerEvent &event) {
     uint16_t refFlow[4] ;
     int rc ;
     do{
-        rc = modbus_read_registers(modbusCtx, /*register address=*/6, /*num registers=*/2, refFlow);
+        rc = modbus_read_registers(modbusCtx, 6,2, refFlow);
         if (rc == -1) {
         return;
     }
@@ -271,15 +302,15 @@ void ManualCalibrationDialog::OnTimer(wxTimerEvent &event) {
     float refFlowValue ;
     double errorValue_percentage;
     memcpy(&refFlowValue , refFlow, sizeof(refFlowValue));
-    // อัปเดตค่า refFlow
-    refFlowInput->SetValue(wxString::Format("%.1f", refFlowValue));
-    // อัปเดตค่าที่คำนวณได้
-    //actFlowInput->SetValue(wxString::Format("%.2f", pidOutput));
-    // คำนวณ Error
-    errorValue_percentage = 100 - (refFlowValue*100)/setpoint;
+    
+    refFlowInput->SetValue(wxString::Format("%.1f", refFlowValue)); // อัปเดตค่า refFlow
+    
+    //actFlowInput->SetValue(wxString::Format("%.2f", pidOutput)); // อัปเดตค่าที่คำนวณได้
+   
+    errorValue_percentage = 100 - (refFlowValue*100)/setpoint;  // คำนวณ Error
     errorInput->SetValue(wxString::Format("%.1f", errorValue_percentage));
-    // คำนวณค่า Act. Flow โดยใช้ PID
-    pidOutput += calculatePID(setpoint, refFlowValue);
+    pidOutput += calculatePID(setpoint, refFlowValue); // คำนวณค่า Act. Flow โดยใช้ PID
+
     // ป้องกันค่า PID Output เกินขอบเขตที่กำหนด
     if (pidOutput > 1.5) {
         pidOutput = 1.5;
@@ -287,30 +318,27 @@ void ManualCalibrationDialog::OnTimer(wxTimerEvent &event) {
 	else if (pidOutput < 0.3) {
 		pidOutput = 0.3;
 	}
-
-    set_current(serialCtx, pidOutput);
-    // เพิ่มค่าใหม่ใน Buffer
-    valueBuffer.push_back(refFlowValue);
+    //------------------------------------------------
+	set_current(serialCtx, pidOutput); // ส่งค่า PID Output ไปที่ Serial Port
+	//------------------------------------------------
+    valueBuffer.push_back(refFlowValue); // เพิ่มค่าใหม่ใน Buffer
     if (valueBuffer.size() > BUFFER_SIZE) {
         valueBuffer.pop_front();
     }
-
+	//------------------------------------------------
     // คำนวณค่า Moving Average
     float sum = accumulate(valueBuffer.begin(), valueBuffer.end(), 0.0f);
     float movingAverage = sum / valueBuffer.size();
-
-    flowData.push_back(refFlowValue); // เก็บค่า flow
+	//------------------------------------------------
+    refData.push_back(refFlowValue); // เก็บค่า flow
     ofstream outFile("flow_data.csv", ios::app); // Append ข้อมูลลงในไฟล์
     if (outFile.is_open()) {
-        outFile << std::fixed << std::setprecision(1) << "Real-time," << refFlowValue << "\n";
+        outFile << "Real-time," << refFlowValue << "\n";
         outFile.close();
     }
-
-    // อัปเดตกราฟด้วยค่าเฉลี่ย
-    UpdateGraph(movingAverage);
+    UpdateGraph(movingAverage); // อัปเดตกราฟด้วยค่าเฉลี่ย
 }
-
-
+//----------------------------------------------------------------------------------------------------------------------------------
 // Bind Event Table
 wxBEGIN_EVENT_TABLE(ManualCalibrationDialog, wxDialog)
     EVT_TIMER(wxID_ANY, ManualCalibrationDialog::OnTimer)

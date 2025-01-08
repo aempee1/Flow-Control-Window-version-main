@@ -21,7 +21,7 @@
 using namespace std;
 using namespace boost::asio;
 
-tuple<string, string, string> ReadPortsFromFile(const string& fileName) ;
+tuple<string,string> ReadPortsFromFile(const string& fileName) ;
 class ManualCalibrationDialog : public wxDialog {
 public:
     ManualCalibrationDialog(wxWindow *parent);
