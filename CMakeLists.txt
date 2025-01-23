@@ -44,7 +44,7 @@ find_package(Matplot++ CONFIG REQUIRED)
 
 
 # เพิ่มไฟล์ต้นฉบับ
-add_executable(MyWxApp main.cpp src/modbus_utils.cpp src/serial_utils.cpp src/comport_setting.cpp src/mainwindow_properties.cpp src/manual_calibrate.cpp src/mathplot.cpp src/ble_device_setting.cpp)
+add_executable(MyWxApp main.cpp src/modbus_utils.cpp src/serial_utils.cpp src/comport_setting.cpp src/mainwindow_properties.cpp src/manual_calibrate.cpp src/mathplot.cpp )
 
 
 # ลิงก์ wxWidgets, Boost และ libmodbus

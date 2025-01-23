@@ -51,3 +51,4 @@ modbus_t* initialize_modbus(const char* device)
 
     return ctx;
 }
+
