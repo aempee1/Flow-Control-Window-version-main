@@ -76,7 +76,6 @@ bool ManualCalibrationDialog::CheckAndLoadPorts(const string& fileName, vector<s
     // cout << "Ports loaded successfully." << endl;  // เพิ่ม log message
     return true;
 }
-
 //----------------------------------------------------------------------------------------------------------------------------------
 double ManualCalibrationDialog::calculatePID(double setpointValue, double currentValue) {
     // คำนวณ Error
@@ -94,40 +93,34 @@ void ManualCalibrationDialog::OnDoneButtonClick(wxCommandEvent& event) {
     // ปิด dialog
     EndModal(wxID_OK);
 }
-void ManualCalibrationDialog::OnSetButtonClick(wxCommandEvent& event) {
-    wxString inputStr = setFlowInput->GetValue();
-    long value;
-    if (inputStr.ToLong(&value)) {
-        setpoint = static_cast<int>(value);
-    }
-    else {
-        wxMessageBox("Invalid input. Please enter an integer value.", "Error", wxOK | wxICON_ERROR, this);
-    }
-}
 void ManualCalibrationDialog::OnLoggingButtonClick(wxCommandEvent& event) {
     graphWindow->Show(); // แสดงกราฟ
     Layout(); // ปรับ layout ใหม่
 }
 void ManualCalibrationDialog::OnStartButtonClick(wxCommandEvent& event) {
-    // เริ่ม timer และเรียก OnTimer เป็นครั้งแรก
-    if (!timer->IsRunning()) {
-        timer->Start(200); // ทำงานทุก 200 ms
-        OnTimer(wxTimerEvent()); // เรียก OnTimer เพื่อเริ่มการทำงานทันที
+    wxString inputStr = setFlowInput->GetValue();
+    long value;
+    if (inputStr.ToLong(&value)) {
+        setpoint = static_cast<int>(value);
+        // เริ่ม timer และเรียก OnTimer เป็นครั้งแรก
+        if (!timer->IsRunning()) {
+            timer->Start(200); // ทำงานทุก 200 ms
+        }
+		startButton->Disable();
+		stopButton->Enable();
     }
-    // Disable the start button and enable the stop button
-    startButton->Disable(); // ปิดการใช้งานปุ่ม Start
-    stopButton->Enable();  // เปิดการใช้งานปุ่ม Stop
+    else {
+        wxMessageBox("Invalid input. Please enter an integer value.", "Error", wxOK | wxICON_ERROR, this);
+    }
+    
 }
 void ManualCalibrationDialog::OnStopButtonClick(wxCommandEvent& event) {
-    // หยุด timer
     if (timer->IsRunning()) {
         timer->Stop();
     }
+    stopButton->Disable();
+    startButton->Enable();
 
-    // Disable the stop button and enable the start button
-    stopButton->Disable(); // ปิดการใช้งานปุ่ม Stop
-    startButton->Enable(); // เปิดการใช้งานปุ่ม Start
-    // แสดง dialog เพื่อบันทึก CSV
     wxMessageDialog confirmDialog(this,
         "Do you want to save the log data?",
         "Confirm Save",
@@ -141,12 +134,11 @@ void ManualCalibrationDialog::OnStopButtonClick(wxCommandEvent& event) {
             wxFD_SAVE | wxFD_OVERWRITE_PROMPT);
 
         if (saveFileDialog.ShowModal() == wxID_CANCEL) {
-            return; // ผู้ใช้ยกเลิกการบันทึก
+            return;
         }
 
-        // บันทึกข้อมูล CSV
         wxString filePath = saveFileDialog.GetPath();
-        ofstream outFile(filePath.ToStdString());
+        ofstream outFile(filePath.ToStdString());  // เปิดไฟล์ใหม่ตามที่ผู้ใช้เลือก
         if (!outFile.is_open()) {
             wxMessageBox("Unable to open file for writing.", "Error", wxOK | wxICON_ERROR, this);
             return;
@@ -154,12 +146,14 @@ void ManualCalibrationDialog::OnStopButtonClick(wxCommandEvent& event) {
 
         // เขียนหัวข้อ CSV
         outFile << "Timestamp,Reference Flow,Active Flow,Error\n";
-        double timestamp = 0;
+
+        // เขียนข้อมูลที่สะสมจาก OnTimer
         for (size_t i = 0; i < refData.size(); ++i) {
-            outFile << timestamp++ << ","         // Write timestamp
-                << refData[i] << ","          // Reference Flow
-                << actData[i] << ","          // Active Flow
-                << errorData[i] << "\n";      // Error
+            outFile << timestampData[i] << ","   // ใช้ Timestamp ที่เก็บไว้
+                << std::fixed << std::setprecision(3)
+                << refData[i] << ","
+                << actData[i] << ","
+                << errorData[i] << "\n";
         }
 
         outFile.close();
@@ -169,19 +163,15 @@ void ManualCalibrationDialog::OnStopButtonClick(wxCommandEvent& event) {
 //----------------------------------------------------------------------------------------------------------------------------------
 ManualCalibrationDialog::ManualCalibrationDialog(wxWindow* parent)
     : wxDialog(parent, wxID_ANY, "Manual Calibration", wxDefaultPosition, wxSize(400, 400), wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER),
-    setpoint(0), timer(new wxTimer(this)), modbusReadTimer(new wxTimer(this)),
-    updateDisplayTimer(new wxTimer(this)), modbusCtx(nullptr), serialCtx(io), BLECtx() 
-{
+    setpoint(0), timer(new wxTimer(this)),modbusCtx(nullptr), serialCtx(io), BLECtx(){
+    
     wxBoxSizer* mainSizer = new wxBoxSizer(wxVERTICAL);
     wxFlexGridSizer* gridSizer = new wxFlexGridSizer(4, 3, 10, 10);
-
     // Set Flow Row
     gridSizer->Add(new wxStaticText(this, wxID_ANY, "Set Flow:"), 0, wxALIGN_CENTER_VERTICAL | wxALIGN_RIGHT);
     setFlowInput = new wxTextCtrl(this, wxID_ANY);
     gridSizer->Add(setFlowInput, 1, wxEXPAND);
-    wxButton* setButton = new wxButton(this, wxID_ANY, "Set");
-    gridSizer->Add(setButton, 0, wxALIGN_CENTER);
-    setButton->Bind(wxEVT_BUTTON, &ManualCalibrationDialog::OnSetButtonClick, this);
+    gridSizer->Add(new wxStaticText(this, wxID_ANY, "m3/h"), 0, wxALIGN_CENTER);
 
     // Ref. Flow Row
     gridSizer->Add(new wxStaticText(this, wxID_ANY, "Ref. Flow:"), 0, wxALIGN_CENTER_VERTICAL | wxALIGN_RIGHT);
@@ -189,7 +179,6 @@ ManualCalibrationDialog::ManualCalibrationDialog(wxWindow* parent)
     refFlowInput->SetEditable(false); // Make the field read-only
     gridSizer->Add(refFlowInput, 1, wxEXPAND);
     gridSizer->Add(new wxStaticText(this, wxID_ANY, "m3/h"), 0, wxALIGN_CENTER_VERTICAL);
-
     // Act. Flow Row
     gridSizer->Add(new wxStaticText(this, wxID_ANY, "Act. Flow:"), 0, wxALIGN_CENTER_VERTICAL | wxALIGN_RIGHT);
     actFlowInput = new wxTextCtrl(this, wxID_ANY);
@@ -209,38 +198,31 @@ ManualCalibrationDialog::ManualCalibrationDialog(wxWindow* parent)
     gridCenterSizer->Add(gridSizer, 0, wxALIGN_CENTER);
     mainSizer->Add(gridCenterSizer, 0, wxALL | wxALIGN_CENTER, 20);
 
-    // สร้าง sizer แนวตั้งสำหรับ Start และ Stop
-    wxBoxSizer* buttonColumnSizer = new wxBoxSizer(wxVERTICAL);
+    // Control Buttons
+    wxBoxSizer* controlButtonSizer = new wxBoxSizer(wxVERTICAL);
 
-    // สร้างปุ่ม Start และ Stop
-    wxButton* startButton = new wxButton(this, wxID_ANY, "Start");
-    wxButton* stopButton = new wxButton(this, wxID_ANY, "Stop");
+    // Row for Start and Stop Buttons
+    wxBoxSizer* startStopRowSizer = new wxBoxSizer(wxHORIZONTAL);
+    startButton = new wxButton(this,1011, "Start");
+    stopButton = new wxButton(this, 1012, "Stop");
+    startStopRowSizer->Add(startButton, 0, wxALL | wxALIGN_CENTER, 5);
+    startStopRowSizer->Add(stopButton, 0, wxALL | wxALIGN_CENTER, 5);
+    controlButtonSizer->Add(startStopRowSizer, 0, wxALIGN_CENTER | wxALL, 5);
+
+    // Row for Show Graph Button
+    showGraphButton = new wxButton(this, wxID_ANY, "Graph Logging");
+    controlButtonSizer->Add(showGraphButton, 2, wxALL | wxALIGN_CENTER, 5);
+
+    // Disable Stop Button Initially
     stopButton->Disable();
-    startButton->Bind(wxEVT_BUTTON, &ManualCalibrationDialog::OnStartButtonClick, this);
-    stopButton->Bind(wxEVT_BUTTON, &ManualCalibrationDialog::OnStopButtonClick, this);
 
-    // เพิ่มปุ่ม Start และ Stop ลงใน buttonColumnSizer
-    buttonColumnSizer->Add(startButton, 0, wxALL | wxALIGN_CENTER, 5);
-    buttonColumnSizer->Add(stopButton, 0, wxALL | wxALIGN_CENTER, 5);
-
-    // เพิ่ม buttonColumnSizer ลงใน mainSizer
-    mainSizer->Add(buttonColumnSizer, 0, wxALIGN_CENTER | wxALL, 10);
-
-    // สร้าง sizer แนวนอนสำหรับ Done และ Graph Logging
-    wxBoxSizer* bottomButtonSizer = new wxBoxSizer(wxHORIZONTAL);
-    wxButton* doneButton = new wxButton(this, wxID_OK, "Done");
-    wxButton* showGraphButton = new wxButton(this, wxID_ANY, "Graph Logging");
-
-    // Bind events ให้กับปุ่ม Done และ Show Graph
-    showGraphButton->Bind(wxEVT_BUTTON, &ManualCalibrationDialog::OnShowGraphButtonClick, this);
-
-    // เพิ่มปุ่มลงใน bottomButtonSizer
-    bottomButtonSizer->Add(doneButton, 0, wxALL, 5);
-    bottomButtonSizer->Add(showGraphButton, 0, wxALL, 5);
-
-    // เพิ่ม bottomButtonSizer ลงใน mainSizer
-    mainSizer->Add(bottomButtonSizer, 0, wxALIGN_CENTER | wxALL, 10);
-
+    // Add Control Buttons to Main Sizer
+    mainSizer->Add(controlButtonSizer, 0, wxALIGN_CENTER | wxALL, 10);
+    // Done Button
+    wxBoxSizer* doneButtonSizer = new wxBoxSizer(wxHORIZONTAL);
+    doneButton = new wxButton(this, 1010, "Done");
+    doneButtonSizer->Add(doneButton, 0, wxALL | wxALIGN_CENTER, 5);
+    mainSizer->Add(doneButtonSizer, 0, wxALIGN_CENTER | wxALL, 10);
     // ตั้งค่า sizer หลัก
     SetSizer(mainSizer);
     Layout();
@@ -264,19 +246,13 @@ ManualCalibrationDialog::ManualCalibrationDialog(wxWindow* parent)
     }
 }
 ManualCalibrationDialog::~ManualCalibrationDialog() {
-    if (timer->IsRunning()) {
-        timer->Stop();
-    }
     if (modbusCtx) {
         modbus_close(modbusCtx);
         modbus_free(modbusCtx);
     }
-	
-    delete modbusReadTimer;
-    delete updateDisplayTimer;
     if (serialCtx.is_open()) {
         serialCtx.close();
-    }
+    } 
     delete timer;
 }
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -295,26 +271,6 @@ void ManualCalibrationDialog::OnShowGraphButtonClick(wxCommandEvent& event) {
     graphDialog->SetSizer(graphSizer);
     graphDialog->Layout();
     graphDialog->ShowModal(); // แสดง dialog แบบ modal
-}
-//----------------------------------------------------------------------------------------------------------------------------------
-void ManualCalibrationDialog::OnModbusReadTimer(wxTimerEvent& event) {
-    uint16_t refFlow[4];
-    int rc = modbus_read_registers(modbusCtx, 6, 2, refFlow);
-    if (rc == -1) {
-        return; // ถ้าอ่านค่าไม่ได้ให้ข้ามไป
-    }
-    float refFlowValue;
-    memcpy(&refFlowValue, refFlow, sizeof(refFlowValue));
-    // เพิ่มค่าใหม่ใน Buffer
-    valueBufferRefFlow.push_back(refFlowValue);
-    if (valueBufferRefFlow.size() > BUFFER_SIZE) {
-        valueBufferRefFlow.pop_front(); // ลบค่าเก่าเมื่อ Buffer เต็ม
-    }
-}
-void ManualCalibrationDialog::OnUpdateDisplayTimer(wxTimerEvent& event) {  // คำนวณค่าเฉลี่ย Moving Average
-    if (valueBufferRefFlow.empty()) {
-        return;
-    }
 }
 //----------------------------------------------------------------------------------------------------------------------------------
 void ManualCalibrationDialog::UpdateGraph(float flow) {
@@ -345,7 +301,7 @@ void ManualCalibrationDialog::OnTimer(wxTimerEvent &event) {
     uint16_t refFlow[4] ;
     int rc ;
     // ใช้ค่าก่อนหน้าหากการอ่านผิดพลาด
-    static float refFlowValue = 0.0f;  // ใช้ตัวแปร static เพื่อเก็บค่าเดิมหากการอ่านผิดพลาด
+    static float refFlowValue = 0.0;  // ใช้ตัวแปร static เพื่อเก็บค่าเดิมหากการอ่านผิดพลาด
     rc = modbus_read_registers(modbusCtx, 6, 2, refFlow);
     if (rc != -1) {  // ตรวจสอบว่า rc ไม่เท่ากับ -1
         memcpy(&refFlowValue, refFlow, sizeof(refFlowValue));  // อัปเดตค่า refFlow ใหม่เมื่อสำเร็จ
@@ -378,23 +334,19 @@ void ManualCalibrationDialog::OnTimer(wxTimerEvent &event) {
     refData.push_back(refFlowValue); // เก็บค่า flow
 	actData.push_back(actFlowValue); // เก็บค่า flow
 	errorData.push_back(errorValue_percentage); // เก็บค่า error
-	wxDateTime now = wxDateTime::Now(); // ดึงเวลาปัจจุบัน
-	wxString currentTime = now.FormatISOCombined(' '); // แปลงเวลาเป็น string
-    ofstream outFile("flow_data.csv", ios::app); // Append ข้อมูลลงในไฟล์
-    if (outFile.is_open()) {
-        outFile << currentTime << refFlowValue << actFlowValue << errorValue_percentage << "\n";
-        outFile.close();
-    }
-    UpdateGraph(movingAverage); // อัปเดตกราฟด้วยค่าเฉลี่ย
+    // เก็บ Timestamp
+    wxDateTime now = wxDateTime::Now();
+    wxString currentTime = now.Format("%Y-%m-%d %H:%M:%S");
+    currentTime+= "S";
+    timestampData.push_back(currentTime.ToStdString());
+ 
 }
 //----------------------------------------------------------------------------------------------------------------------------------
 // Bind Event Table
 wxBEGIN_EVENT_TABLE(ManualCalibrationDialog, wxDialog)
     EVT_TIMER(wxID_ANY, ManualCalibrationDialog::OnTimer)
-    EVT_TIMER(wxID_ANY, ManualCalibrationDialog::OnModbusReadTimer)
-    EVT_TIMER(wxID_ANY, ManualCalibrationDialog::OnUpdateDisplayTimer)
-    EVT_BUTTON(wxID_OK, ManualCalibrationDialog::OnDoneButtonClick)
-    EVT_BUTTON(wxID_ANY, ManualCalibrationDialog::OnStartButtonClick)
-    EVT_BUTTON(wxID_ANY, ManualCalibrationDialog::OnStopButtonClick)
+    EVT_BUTTON(1010, ManualCalibrationDialog::OnDoneButtonClick)
+    EVT_BUTTON(1011, ManualCalibrationDialog::OnStartButtonClick)
+    EVT_BUTTON(1012, ManualCalibrationDialog::OnStopButtonClick)
 wxEND_EVENT_TABLE()
 //----------------------------------------------------------------------------------------------------------------------------------

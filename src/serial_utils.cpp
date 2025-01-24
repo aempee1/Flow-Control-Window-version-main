@@ -87,15 +87,12 @@ void send_scpi_command(serial_port& serial, const string& command, string& respo
         //cout << "Command sent: " << command << endl;
         return;
     }
-
     // ถ้าคำสั่งต้องการ response
     boost::asio::streambuf buffer; //กำหนด namespace แบบเต็มเพื่อไม่ให้ compiler กำกวมกับการเลือกใช้ * ให้ใช้ class streambuf ของ boost *
     read_until(serial, buffer, '\n');
-
     // แปลงข้อมูลที่อ่านได้จาก buffer เป็น string
     istream input_stream(&buffer);
     getline(input_stream, response);
-
     // เช็คว่ามีข้อมูลหรือไม่
     if (!response.empty()) {
         //cout << "Received response: " << response << endl;
