@@ -7,6 +7,14 @@ vector<double> actData;
 vector<double> errorData;
 vector<double> refData;
 //-----------------------------
+//variable in use in ontime function
+uint16_t refFlow[4];
+int rc;
+static float refFlowValue = 0.0; // ตัวแปร static เพื่อเก็บค่าเดิมหากการอ่านผิดพลาด
+static float actFlowValue = 0.0; // ใช้ค่าเดิมหากการอ่านไม่สำเร็จ
+static float errorValue_percentage = 0.0;
+static bool dothread = false;
+//-----------------------------
 // เพิ่มค่าเริ่มต้นของ PID Controller 
 //const double Kp = 0.007981535232; // for voltage control
 const double Kp = 9.03223474630576e-4; // for current control
@@ -16,6 +24,101 @@ double integral = 0.0;
 double previousError = 0.0;
 double pidOutput = 0.3 ;
 io_service io; // iner loop ,fee foward
+//----------------------------------------------------------------------------------------------------------------------------------
+ManualCalibrationDialog::ManualCalibrationDialog(wxWindow* parent)
+    : wxDialog(parent, wxID_ANY, "Manual Calibration", wxDefaultPosition, wxSize(400, 400), wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER),
+    setpoint(0), timer(new wxTimer(this)), modbusCtx(nullptr), serialCtx(io), BLECtx() {
+
+    wxBoxSizer* mainSizer = new wxBoxSizer(wxVERTICAL);
+    wxFlexGridSizer* gridSizer = new wxFlexGridSizer(4, 3, 10, 10);
+    // Set Flow Row
+    gridSizer->Add(new wxStaticText(this, wxID_ANY, "Set Flow:"), 0, wxALIGN_CENTER_VERTICAL | wxALIGN_RIGHT);
+    setFlowInput = new wxTextCtrl(this, wxID_ANY);
+    gridSizer->Add(setFlowInput, 1, wxEXPAND);
+    gridSizer->Add(new wxStaticText(this, wxID_ANY, "m3/h"), 0, wxALIGN_CENTER);
+
+    // Ref. Flow Row
+    gridSizer->Add(new wxStaticText(this, wxID_ANY, "Ref. Flow:"), 0, wxALIGN_CENTER_VERTICAL | wxALIGN_RIGHT);
+    refFlowInput = new wxTextCtrl(this, wxID_ANY);
+    refFlowInput->SetEditable(false); // Make the field read-only
+    gridSizer->Add(refFlowInput, 1, wxEXPAND);
+    gridSizer->Add(new wxStaticText(this, wxID_ANY, "m3/h"), 0, wxALIGN_CENTER_VERTICAL);
+    // Act. Flow Row
+    gridSizer->Add(new wxStaticText(this, wxID_ANY, "Act. Flow:"), 0, wxALIGN_CENTER_VERTICAL | wxALIGN_RIGHT);
+    actFlowInput = new wxTextCtrl(this, wxID_ANY);
+    actFlowInput->SetEditable(false); // Make the field read-only
+    gridSizer->Add(actFlowInput, 1, wxEXPAND);
+    gridSizer->Add(new wxStaticText(this, wxID_ANY, "m3/h"), 0, wxALIGN_CENTER_VERTICAL);
+
+    // Error Row
+    gridSizer->Add(new wxStaticText(this, wxID_ANY, "Error:"), 0, wxALIGN_CENTER_VERTICAL | wxALIGN_RIGHT);
+    errorInput = new wxTextCtrl(this, wxID_ANY);
+    errorInput->SetEditable(false);
+    gridSizer->Add(errorInput, 1, wxEXPAND);
+    gridSizer->Add(new wxStaticText(this, wxID_ANY, "%"), 0, wxALIGN_CENTER_VERTICAL);
+
+    // Center Grid
+    wxBoxSizer* gridCenterSizer = new wxBoxSizer(wxHORIZONTAL);
+    gridCenterSizer->Add(gridSizer, 0, wxALIGN_CENTER);
+    mainSizer->Add(gridCenterSizer, 0, wxALL | wxALIGN_CENTER, 20);
+
+    // Control Buttons
+    wxBoxSizer* controlButtonSizer = new wxBoxSizer(wxVERTICAL);
+
+    // Row for Start and Stop Buttons
+    wxBoxSizer* startStopRowSizer = new wxBoxSizer(wxHORIZONTAL);
+    startButton = new wxButton(this, 1011, "Start");
+    stopButton = new wxButton(this, 1012, "Stop");
+    startStopRowSizer->Add(startButton, 0, wxALL | wxALIGN_CENTER, 5);
+    startStopRowSizer->Add(stopButton, 0, wxALL | wxALIGN_CENTER, 5);
+    controlButtonSizer->Add(startStopRowSizer, 0, wxALIGN_CENTER | wxALL, 5);
+
+    // Row for Show Graph Button
+    showGraphButton = new wxButton(this, 1013, "Graph Logging");
+    controlButtonSizer->Add(showGraphButton, 2, wxALL | wxALIGN_CENTER, 5);
+
+    // Disable Stop Button Initially
+    stopButton->Disable();
+
+    // Add Control Buttons to Main Sizer
+    mainSizer->Add(controlButtonSizer, 0, wxALIGN_CENTER | wxALL, 10);
+    // Done Button
+    wxBoxSizer* doneButtonSizer = new wxBoxSizer(wxHORIZONTAL);
+    doneButton = new wxButton(this, 1010, "Done");
+    doneButtonSizer->Add(doneButton, 0, wxALL | wxALIGN_CENTER, 5);
+    mainSizer->Add(doneButtonSizer, 0, wxALIGN_CENTER | wxALL, 10);
+    // ตั้งค่า sizer หลัก
+    SetSizer(mainSizer);
+    Layout();
+    Center();
+
+    // Load ports from file
+    vector<string> selectedPorts;
+    if (!CheckAndLoadPorts("properties.txt", selectedPorts)) {
+        return; // หากไม่มีพอร์ตที่เลือกให้หยุดการทำงานของ dialog
+    }
+    if (selectedPorts.size() < 3) {
+        wxMessageBox("Selected ports are insufficient.", "Error", wxOK | wxICON_ERROR, this);
+        return;
+    }
+    BLECtx = selectedPorts[0];
+    serialCtx = InitialSerial(io, selectedPorts[2].c_str());
+    modbusCtx = InitialModbus(selectedPorts[1].c_str());
+    if (!modbusCtx) {
+        wxMessageBox("Failed to initialize Modbus.", "Error", wxOK | wxICON_ERROR, this);
+        return;
+    }
+}
+ManualCalibrationDialog::~ManualCalibrationDialog() {
+    if (modbusCtx) {
+        modbus_close(modbusCtx);
+        modbus_free(modbusCtx);
+    }
+    if (serialCtx.is_open()) {
+        serialCtx.close();
+    }
+    delete timer;
+}
 //----------------------------------------------------------------------------------------------------------------------------------
 serial_port ManualCalibrationDialog::InitialSerial(io_service& io, const string& port_name)
 {
@@ -143,10 +246,8 @@ void ManualCalibrationDialog::OnStopButtonClick(wxCommandEvent& event) {
             wxMessageBox("Unable to open file for writing.", "Error", wxOK | wxICON_ERROR, this);
             return;
         }
-
         // เขียนหัวข้อ CSV
-        outFile << "Timestamp,Reference Flow,Active Flow,Error\n";
-
+        outFile << "Timestamp,Reference Flow (l/min),Active Flow (l/min),Error (%)\n";
         // เขียนข้อมูลที่สะสมจาก OnTimer
         for (size_t i = 0; i < refData.size(); ++i) {
             outFile << timestampData[i] << ","   // ใช้ Timestamp ที่เก็บไว้
@@ -161,113 +262,33 @@ void ManualCalibrationDialog::OnStopButtonClick(wxCommandEvent& event) {
     }
 }
 //----------------------------------------------------------------------------------------------------------------------------------
-ManualCalibrationDialog::ManualCalibrationDialog(wxWindow* parent)
-    : wxDialog(parent, wxID_ANY, "Manual Calibration", wxDefaultPosition, wxSize(400, 400), wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER),
-    setpoint(0), timer(new wxTimer(this)),modbusCtx(nullptr), serialCtx(io), BLECtx(){
-    
-    wxBoxSizer* mainSizer = new wxBoxSizer(wxVERTICAL);
-    wxFlexGridSizer* gridSizer = new wxFlexGridSizer(4, 3, 10, 10);
-    // Set Flow Row
-    gridSizer->Add(new wxStaticText(this, wxID_ANY, "Set Flow:"), 0, wxALIGN_CENTER_VERTICAL | wxALIGN_RIGHT);
-    setFlowInput = new wxTextCtrl(this, wxID_ANY);
-    gridSizer->Add(setFlowInput, 1, wxEXPAND);
-    gridSizer->Add(new wxStaticText(this, wxID_ANY, "m3/h"), 0, wxALIGN_CENTER);
-
-    // Ref. Flow Row
-    gridSizer->Add(new wxStaticText(this, wxID_ANY, "Ref. Flow:"), 0, wxALIGN_CENTER_VERTICAL | wxALIGN_RIGHT);
-    refFlowInput = new wxTextCtrl(this, wxID_ANY);
-    refFlowInput->SetEditable(false); // Make the field read-only
-    gridSizer->Add(refFlowInput, 1, wxEXPAND);
-    gridSizer->Add(new wxStaticText(this, wxID_ANY, "m3/h"), 0, wxALIGN_CENTER_VERTICAL);
-    // Act. Flow Row
-    gridSizer->Add(new wxStaticText(this, wxID_ANY, "Act. Flow:"), 0, wxALIGN_CENTER_VERTICAL | wxALIGN_RIGHT);
-    actFlowInput = new wxTextCtrl(this, wxID_ANY);
-    actFlowInput->SetEditable(false); // Make the field read-only
-    gridSizer->Add(actFlowInput, 1, wxEXPAND);
-    gridSizer->Add(new wxStaticText(this, wxID_ANY, "m3/h"), 0, wxALIGN_CENTER_VERTICAL);
-
-    // Error Row
-    gridSizer->Add(new wxStaticText(this, wxID_ANY, "Error:"), 0, wxALIGN_CENTER_VERTICAL | wxALIGN_RIGHT);
-    errorInput = new wxTextCtrl(this, wxID_ANY);
-    errorInput->SetEditable(false);
-    gridSizer->Add(errorInput, 1, wxEXPAND);
-    gridSizer->Add(new wxStaticText(this, wxID_ANY, "%"), 0, wxALIGN_CENTER_VERTICAL);
-
-    // Center Grid
-    wxBoxSizer* gridCenterSizer = new wxBoxSizer(wxHORIZONTAL);
-    gridCenterSizer->Add(gridSizer, 0, wxALIGN_CENTER);
-    mainSizer->Add(gridCenterSizer, 0, wxALL | wxALIGN_CENTER, 20);
-
-    // Control Buttons
-    wxBoxSizer* controlButtonSizer = new wxBoxSizer(wxVERTICAL);
-
-    // Row for Start and Stop Buttons
-    wxBoxSizer* startStopRowSizer = new wxBoxSizer(wxHORIZONTAL);
-    startButton = new wxButton(this,1011, "Start");
-    stopButton = new wxButton(this, 1012, "Stop");
-    startStopRowSizer->Add(startButton, 0, wxALL | wxALIGN_CENTER, 5);
-    startStopRowSizer->Add(stopButton, 0, wxALL | wxALIGN_CENTER, 5);
-    controlButtonSizer->Add(startStopRowSizer, 0, wxALIGN_CENTER | wxALL, 5);
-
-    // Row for Show Graph Button
-    showGraphButton = new wxButton(this, wxID_ANY, "Graph Logging");
-    controlButtonSizer->Add(showGraphButton, 2, wxALL | wxALIGN_CENTER, 5);
-
-    // Disable Stop Button Initially
-    stopButton->Disable();
-
-    // Add Control Buttons to Main Sizer
-    mainSizer->Add(controlButtonSizer, 0, wxALIGN_CENTER | wxALL, 10);
-    // Done Button
-    wxBoxSizer* doneButtonSizer = new wxBoxSizer(wxHORIZONTAL);
-    doneButton = new wxButton(this, 1010, "Done");
-    doneButtonSizer->Add(doneButton, 0, wxALL | wxALIGN_CENTER, 5);
-    mainSizer->Add(doneButtonSizer, 0, wxALIGN_CENTER | wxALL, 10);
-    // ตั้งค่า sizer หลัก
-    SetSizer(mainSizer);
-    Layout();
-    Center();
-
-    // Load ports from file
-    vector<string> selectedPorts;
-    if (!CheckAndLoadPorts("properties.txt", selectedPorts)) {
-        return; // หากไม่มีพอร์ตที่เลือกให้หยุดการทำงานของ dialog
-    }
-    if (selectedPorts.size() < 3) {
-        wxMessageBox("Selected ports are insufficient.", "Error", wxOK | wxICON_ERROR, this);
-        return;
-    }
-    BLECtx = selectedPorts[0];
-    serialCtx = InitialSerial(io, selectedPorts[2].c_str());
-    modbusCtx = InitialModbus(selectedPorts[1].c_str());
-    if (!modbusCtx) {
-        wxMessageBox("Failed to initialize Modbus.", "Error", wxOK | wxICON_ERROR, this);
-        return;
-    }
-}
-ManualCalibrationDialog::~ManualCalibrationDialog() {
-    if (modbusCtx) {
-        modbus_close(modbusCtx);
-        modbus_free(modbusCtx);
-    }
-    if (serialCtx.is_open()) {
-        serialCtx.close();
-    } 
-    delete timer;
-}
-//----------------------------------------------------------------------------------------------------------------------------------
 void ManualCalibrationDialog::OnShowGraphButtonClick(wxCommandEvent& event) {
     wxDialog* graphDialog = new wxDialog(this, wxID_ANY, "Graph", wxDefaultPosition, wxSize(800, 400), wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER);
-
     mpWindow* graphWindow = new mpWindow(graphDialog, wxID_ANY, wxDefaultPosition, wxSize(800, 400));
+
+    // สร้างเลเยอร์สำหรับแกน X และ Y
+    mpScaleX* xAxis = new mpScaleX(wxT("Time (s)"), mpALIGN_BOTTOM, true, mpX_NORMAL);
+    mpScaleY* yAxis = new mpScaleY(wxT("Flow Rate (m3/h)"), mpALIGN_LEFT, true);
+    xAxis->SetPen(wxPen(*wxBLACK, 1, wxPENSTYLE_SOLID));
+    yAxis->SetPen(wxPen(*wxBLACK, 1, wxPENSTYLE_SOLID));
+
+    // กำหนดช่วงค่าของแกน X และ Y เพื่อให้เริ่มที่ (0,0)
+    // เพิ่มเลเยอร์แกนเข้าไปใน graphWindow
+    graphWindow->AddLayer(xAxis);
+    graphWindow->AddLayer(yAxis);
+
+    // สร้างเลเยอร์ข้อมูล
     mpFXYVector* graphLayer = new mpFXYVector(wxT("Flow Data"));
     graphLayer->SetContinuity(true);
+    graphLayer->SetPen(wxPen(*wxBLUE, 2, wxPENSTYLE_SOLID)); // เส้นกราฟเป็นสีน้ำเงิน
     graphWindow->AddLayer(graphLayer);
+
+    // ปรับการมองเห็นกราฟให้เหมาะสม
+    graphWindow->EnableDoubleBuffer(true);
     graphWindow->Fit();
 
     wxBoxSizer* graphSizer = new wxBoxSizer(wxVERTICAL);
     graphSizer->Add(graphWindow, 1, wxALL | wxEXPAND, 10);
-
     graphDialog->SetSizer(graphSizer);
     graphDialog->Layout();
     graphDialog->ShowModal(); // แสดง dialog แบบ modal
@@ -296,50 +317,58 @@ void ManualCalibrationDialog::UpdateGraph(float flow) {
     graphWindow->Fit(); // ปรับมุมมองกราฟให้พอดี
     graphWindow->Refresh();
 }
-void ManualCalibrationDialog::OnTimer(wxTimerEvent &event) {
-    double errorValue_percentage;
-    uint16_t refFlow[4] ;
-    int rc ;
-    // ใช้ค่าก่อนหน้าหากการอ่านผิดพลาด
-    static float refFlowValue = 0.0;  // ใช้ตัวแปร static เพื่อเก็บค่าเดิมหากการอ่านผิดพลาด
-    rc = modbus_read_registers(modbusCtx, 6, 2, refFlow);
-    if (rc != -1) {  // ตรวจสอบว่า rc ไม่เท่ากับ -1
-        memcpy(&refFlowValue, refFlow, sizeof(refFlowValue));  // อัปเดตค่า refFlow ใหม่เมื่อสำเร็จ
-    }
-    refFlowInput->SetValue(wxString::Format("%.1f", refFlowValue)); // อัปเดตค่า refFlow
-	float actFlowValue = sendAndReceiveBetweenPorts(BLECtx); // ส่งคำสั่งไปยัง BLE
-	actFlowInput->SetValue(wxString::Format("%.1f", actFlowValue )); // อัปเดตค่า actFlow  
-    errorValue_percentage = 100 - (refFlowValue*100)/actFlowValue;  // คำนวณ Error
-    errorInput->SetValue(wxString::Format("%.1f", errorValue_percentage));
-    pidOutput += calculatePID(setpoint, refFlowValue); // คำนวณค่า Act. Flow โดยใช้ PID
-    // ป้องกันค่า PID Output เกินขอบเขตที่กำหนด
-    if (pidOutput > 1.5) {
-        pidOutput = 1.5;
-	}
-	else if (pidOutput < 0.3) {
-		pidOutput = 0.3;
-	}
-    //------------------------------------------------
-	set_current(serialCtx, pidOutput); // ส่งค่า PID Output ไปที่ Serial Port
-	//------------------------------------------------
-    valueBufferRefFlow.push_back(refFlowValue); // เพิ่มค่าใหม่ใน Buffer
-    if (valueBufferRefFlow.size() > BUFFER_SIZE) {
-        valueBufferRefFlow.pop_front();
-    }
-	//------------------------------------------------
-    // คำนวณค่า Moving Average
-    float sum = accumulate(valueBufferRefFlow.begin(), valueBufferRefFlow.end(), 0.0f);
-    float movingAverage = sum / valueBufferRefFlow.size();
-	//------------------------------------------------
-    refData.push_back(refFlowValue); // เก็บค่า flow
-	actData.push_back(actFlowValue); // เก็บค่า flow
-	errorData.push_back(errorValue_percentage); // เก็บค่า error
-    // เก็บ Timestamp
-    wxDateTime now = wxDateTime::Now();
-    wxString currentTime = now.Format("%Y-%m-%d %H:%M:%S");
-    currentTime+= "S";
-    timestampData.push_back(currentTime.ToStdString());
- 
+void ManualCalibrationDialog::OnTimer(wxTimerEvent& event) {
+    // ใช้ std::thread เพื่อรันโค้ดแบบ asynchronous
+        std::thread([this]() {
+            try {
+                {
+                    std::lock_guard<std::mutex> lock(dataMutex); // ล็อคตัวแปรร่วมสำหรับการอ่านค่า
+                    rc = modbus_read_registers(modbusCtx, 6, 2, refFlow);
+                    if (rc != -1) { // ตรวจสอบว่า rc ไม่เท่ากับ -1
+                        memcpy(&refFlowValue, refFlow, sizeof(refFlowValue)); // อัปเดตค่า refFlow ใหม่เมื่อสำเร็จ
+                    }
+                }
+                // อ่านค่าจาก BLE
+                float newActFlowValue = sendAndReceiveBetweenPorts(BLECtx);
+                if (newActFlowValue != 0.0f) {
+                    actFlowValue = newActFlowValue; // อัปเดตค่าหากการอ่านสำเร็จ
+                }
+                // คำนวณ Error Value
+                errorValue_percentage = 100.0f - (refFlowValue * 100.0f) / actFlowValue; // คำนวณ Error
+                // คำนวณค่า Act. Flow โดยใช้ PID
+                pidOutput += calculatePID(setpoint, refFlowValue);
+                // ป้องกันค่า PID Output เกินขอบเขตที่กำหนด
+                pidOutput = std::clamp<double>(pidOutput, 0.3f, 1.5f);
+                // ส่งค่า PID Output ไปที่ Serial Port
+                set_current(serialCtx, pidOutput);
+                // เพิ่มค่าใหม่ใน Buffer (thread-safe)
+                {
+                    std::lock_guard<std::mutex> lock(dataMutex);
+                    valueBufferRefFlow.push_back(refFlowValue);
+                    if (valueBufferRefFlow.size() > BUFFER_SIZE) {
+                        valueBufferRefFlow.pop_front();
+                    }
+                }
+                {
+                    std::lock_guard<std::mutex> lock(dataMutex);
+                    refData.push_back(refFlowValue);
+                    actData.push_back(actFlowValue);
+                    errorData.push_back(errorValue_percentage);
+                    // เก็บ Timestamp
+                    wxDateTime now = wxDateTime::Now();
+                    wxString currentTime = now.Format("%Y-%m-%d %H:%M:%S");
+                    currentTime += "S";
+                    timestampData.push_back(currentTime.ToStdString());
+                }
+                refFlowInput->SetValue(wxString::Format("%.1f", refFlowValue)); // อัปเดตค่า refFlow
+                actFlowInput->SetValue(wxString::Format("%.1f", actFlowValue)); // อัปเดตค่า actFlow
+                errorInput->SetValue(wxString::Format("%.1f", errorValue_percentage)); // อัปเดตค่า error
+            }
+            catch (const std::exception& e) {
+                wxMessageBox(wxString::Format("Error in thread: %s", e.what()), wxT("Error"), wxOK | wxICON_ERROR);
+            }
+            }).detach(); // detach thread เพื่อให้ทำงานแบบ background
+            
 }
 //----------------------------------------------------------------------------------------------------------------------------------
 // Bind Event Table
@@ -348,5 +377,6 @@ wxBEGIN_EVENT_TABLE(ManualCalibrationDialog, wxDialog)
     EVT_BUTTON(1010, ManualCalibrationDialog::OnDoneButtonClick)
     EVT_BUTTON(1011, ManualCalibrationDialog::OnStartButtonClick)
     EVT_BUTTON(1012, ManualCalibrationDialog::OnStopButtonClick)
+	EVT_BUTTON(1013, ManualCalibrationDialog::OnShowGraphButtonClick)
 wxEND_EVENT_TABLE()
 //----------------------------------------------------------------------------------------------------------------------------------

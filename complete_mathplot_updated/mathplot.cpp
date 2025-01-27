@@ -3159,25 +3159,29 @@ void mpBitmapLayer::Plot(wxDC & dc, mpWindow & w)
 #include "mathplot.h"
 #include <wx/dc.h>
 
-//void mpWindow::SetRange(double xMin, double xMax, double yMin, double yMax) {
-//    // ปรับขอบเขตของการแสดงผล
-//    m_posX = xMin;
-//    m_posY = yMax; // Y อาจต้องกลับทิศเนื่องจากทิศของกราฟใน wxMathPlot
-//    m_scaleX = GetClientSize().GetWidth() / (xMax - xMin);
-//    m_scaleY = GetClientSize().GetHeight() / (yMax - yMin);
-//    UpdateAll();
-//}
-//
-//void mpWindow::SetCoordinateOrigin(double x, double y) {
-//    // กำหนดจุดกำเนิดใหม่
-//    m_posX = x;
-//    m_posY = y;
-//    UpdateAll();
-//}
-//
-//void mpWindow::SetLimits(double xMin, double xMax, double yMin, double yMax) {
-//    // ปรับขอบเขตของการแสดงผลพร้อมล็อกจุดกำเนิด
-//    SetRange(xMin, xMax, yMin, yMax);
-//}
+void mpWindow::SetRange(double xMin, double xMax, double yMin, double yMax) {
+    // ปรับขอบเขตของการแสดงผล
+    m_posX = xMin;
+    m_posY = yMax; // Y อาจต้องกลับทิศเนื่องจากทิศของกราฟใน wxMathPlot
+    m_scaleX = GetClientSize().GetWidth() / (xMax - xMin);
+    m_scaleY = GetClientSize().GetHeight() / (yMax - yMin);
+    UpdateAll();
+}
 
+void mpWindow::SetCoordinateOrigin(double x, double y) {
+    // กำหนดจุดกำเนิดใหม่
+    m_posX = x;
+    m_posY = y;
+    UpdateAll();
+}
 
+void mpWindow::SetLimits(double xMin, double xMax, double yMin, double yMax) {
+    // ปรับขอบเขตของการแสดงผลพร้อมล็อกจุดกำเนิด
+    SetRange(xMin, xMax, yMin, yMax);
+}
+
+void mpWindow::UpdateAll() {
+    // ฟังก์ชันสำหรับอัปเดตหน้าต่าง
+    Refresh();
+    Update();
+}

@@ -1709,9 +1709,36 @@ protected:
 
 };
 
-#endif _MP_MATHPLOT_H_
+
 
 /*@}*/
 
+#endif // _MP_MATHPLOT_H_
 
 
+// Updated methods
+
+// mathplot.h
+#ifndef _MP_MATHPLOT_H_
+#define _MP_MATHPLOT_H_
+
+#include <wx/wx.h>
+#include <wx/scrolwin.h>
+
+class mpWindow : public wxScrolledWindow {
+public:
+    // ฟังก์ชันเพิ่มเติม
+    void SetRange(double xMin, double xMax, double yMin, double yMax);
+    void SetCoordinateOrigin(double x, double y);
+    void SetLimits(double xMin, double xMax, double yMin, double yMax);
+
+private:
+    double m_posX = 0.0;
+    double m_posY = 0.0;
+    double m_scaleX = 1.0;
+    double m_scaleY = 1.0;
+
+    void UpdateAll(); // ฟังก์ชันสำหรับอัปเดตหน้าต่าง
+};
+
+#endif // _MP_MATHPLOT_H_

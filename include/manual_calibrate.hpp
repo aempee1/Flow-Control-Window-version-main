@@ -22,6 +22,8 @@
 #include <chrono>
 #include <ctime>
 #include <thread>
+#include <mutex>
+#include <algorithm> // อย่าลืม include
 
 using namespace std;
 using namespace boost::asio;
@@ -37,11 +39,18 @@ public:
     void OnStopButtonClick(wxCommandEvent& event);
     void OnDoneButtonClick(wxCommandEvent& event); 
     void OnLoggingButtonClick(wxCommandEvent& event);
+    void readValues();
+	void calculateAndWriteValues();
+	void updateDisplay();
     //------------------------------------------------------------------------------------------------
     double calculatePID(double setpointValue, double currentValue);
     wxDECLARE_EVENT_TABLE();
 
 private:
+    std::mutex dataMutex;
+
+    std::atomic<bool> shouldStop; // ตัวแปรสถานะเพื่อควบคุม thread
+    std::thread workerThread;
 	//------------------------------------------------------------------------------------------------
     // ประกาศตัวแปรของปุ่มที่นี่
     wxButton* startButton;

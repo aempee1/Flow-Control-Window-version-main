@@ -35,7 +35,7 @@ float sendAndReceiveBetweenPorts(const string& portSend, unsigned int baudrate )
         // ส่งข้อมูล
         write(serialSend, boost::asio::buffer(testMessage));
         // หน่วงเวลาให้การรับข้อมูลสมบูรณ์
-        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+       /* std::this_thread::sleep_for(std::chrono::milliseconds(100));*/
         // รับข้อมูลที่ส่งกลับ
         vector<uint8_t> responseBuffer(256);
         size_t bytesRead = serialSend.read_some(buffer(responseBuffer));
@@ -70,6 +70,7 @@ float sendAndReceiveBetweenPorts(const string& portSend, unsigned int baudrate )
     }
     catch (const std::exception& e) {
         cerr << "Error: " << e.what() <<endl;
+        return 0;
     }
 }
 // ส่งคำสั่งไปยัง Serial Port
