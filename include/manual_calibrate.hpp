@@ -8,10 +8,14 @@
 #include <wx/valnum.h>
 #include <wx/datetime.h>
 #include <wx/thread.h>
+#include <wx/progdlg.h>   // สำหรับ wxProgressDialog
 #include "mathplot.h"
 #include "modbus_utils.hpp"
 #include "serial_utils.hpp"
 
+#include <boost/lockfree/queue.hpp>
+
+#include <atomic>
 #include <fstream>
 #include <string>
 #include <tuple>
@@ -23,67 +27,99 @@
 #include <ctime>
 #include <thread>
 #include <mutex>
-#include <algorithm> // อย่าลืม include
+#include <algorithm> 
+#include <queue>
+#include <optional>
 
 using namespace std;
 using namespace boost::asio;
 
+std::string formatTimestamp(long milliseconds);
+//----------------------------------------------------------------------------------------------------------------------------------
 tuple<string,string,string> ReadPortsFromFile(const string& fileName) ;
+//----------------------------------------------------------------------------------------------------------------------------------
 class ManualCalibrationDialog : public wxDialog {
 public:
     ManualCalibrationDialog(wxWindow *parent);
     ~ManualCalibrationDialog();
     //-------------------------------------------------------------------------------------------------
-    void OnShowGraphButtonClick(wxCommandEvent& event);
     void OnStartButtonClick(wxCommandEvent& event);
     void OnStopButtonClick(wxCommandEvent& event);
     void OnDoneButtonClick(wxCommandEvent& event); 
-    void OnLoggingButtonClick(wxCommandEvent& event);
-    void readValues();
-	void calculateAndWriteValues();
-	void updateDisplay();
+	//-------------------------------------------------------------------------------------------------
+    void readModbusWorker();
+    void readBluetoothWorker();
     //------------------------------------------------------------------------------------------------
     double calculatePID(double setpointValue, double currentValue);
     wxDECLARE_EVENT_TABLE();
 
 private:
-    std::mutex dataMutex;
+    std::chrono::steady_clock::time_point initialTime;
+    // Struct for data entries
+    struct DataEntry {
+        float Flow;
+    };
+    // variable in use in readValuesWorker function
+    float refFlowValue = 0.0;
+    float actFlowValue = 0.0;
+    float errorValue_percentage = 0.0;
 
-    std::atomic<bool> shouldStop; // ตัวแปรสถานะเพื่อควบคุม thread
-    std::thread workerThread;
+    deque<double> setpointData, actData, errorData, refData;
+    deque<long> pushTimestamps; // Vector to store push timestamps
+
+    boost::lockfree::queue<DataEntry> refFlowBuffer{ 10240 }; // กำหนดขนาด 1024
+	boost::lockfree::queue<DataEntry> actFlowBuffer{ 10240 }; // กำหนดขนาด 1024
+    std::thread modbusThread;
+    std::thread bluetoothThread;
+    //----------------------------------------------------------------------------------------------------------------------------------
+    //variable in use in ontime function
+    const int MIN_SETPOINT = 0;
+    const int MAX_SETPOINT = 50;
+    //-----------------------------
+    double integral = 0.0;
+    double previousError = 0.0;
+    double pidOutput = 0.3;
+    //------------------------------------------------------------------------------------------------
+    // เพิ่มค่าเริ่มต้นของ PID Controller 
+    //const double Kp = 0.007981535232; // for voltage control
+    const double Kp = 9.03223474630576e-4; // for current control
+    const double Ki = 0.0271542857142857;
+    const double Kd = 0.0020869232374223;
 	//------------------------------------------------------------------------------------------------
+    uint16_t refFlow[4];
+    int rc;
+	//------------------------------------------------------------------------------------------------
+    std::mutex dataMutex;
+	//------------------------------------------------------------------------------------------------
+    std::vector<std::string> timestampData; // เก็บข้อมูล Timestamp
+    std::vector<long> elapsedTimestamps; // เวลาที่ผ่านไปจากการอ่านครั้งแรก (ms)
+    std::vector<long> pushIntervals;    // เก็บระยะห่างระหว่างการ Push (หน่วย: มิลลิวินาที)
+	//------------------------------------------------------------------------------------------------
+    wxTimer timerRead;   // Timer สำหรับการอ่านค่า
+    wxDateTime initialReadTime; // เวลาเริ่มต้นสำหรับการคำนวณ Elapsed Time
+    //------------------------------------------------------------------------------------------------
     // ประกาศตัวแปรของปุ่มที่นี่
     wxButton* startButton;
     wxButton* stopButton;
     wxButton* showGraphButton;
     wxButton* doneButton;
-    mpWindow* graphWindow; // Window for plotting the graph 
-	mpFXYVector* setpointLayer; // Graph layer for setpoint data
-    mpFXYVector* graphLayer; // Graph layer for X-Y data
-    vector<double> xData;
-    vector<double> yData;
 	//------------------------------------------------------------------------------------------------
     bool CheckAndLoadPorts(const string& fileName, vector<string>& ports);
-    void UpdateGraph(float flow); // Function to update graph data
-    void OnTimer(wxTimerEvent& event); // Handler สำหรับ Timer
-    wxTimer* timer; // Timer
-	//------------------------------------------------------------------------------------------------
-    modbus_t* modbusCtx;
-	string BLECtx;
+    void OnReadTimer(wxTimerEvent& event);    // ฟังก์ชันเรียกเมื่อ timerRead ทำงาน
+   	//------------------------------------------------------------------------------------------------
     serial_port serialCtx;
+    modbus_t* modbusCtx;
+    string BLECtx;
     serial_port InitialSerial(io_service& io, const string& port_name);
     modbus_t* InitialModbus(const char* modbus_port);
+
 protected:
     int setpoint ;
-	double previousError = 0; std::vector<std::string> timestampData; // เก็บข้อมูล Timestamp
 	//------------------------------------------------------------------------------------------------
     wxTextCtrl *setFlowInput;
     wxTextCtrl *refFlowInput;
     wxTextCtrl *actFlowInput;
     wxTextCtrl *errorInput;
 	//------------------------------------------------------------------------------------------------
-    std::deque<float> valueBufferRefFlow; // Buffer สำหรับเก็บค่า Modbus
-    std::deque<float> valueBufferActFlow; // Buffer สำหรับเก็บค่า Modbus
-    const int BUFFER_SIZE = 10; // เก็บค่าล่าสุด 10 ค่า (50 ms x 10 = 500 ms)
 };
 #endif // MANUAL_CALIBRATE_HPP

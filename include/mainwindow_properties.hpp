@@ -20,8 +20,7 @@ private:
     void OnAboutSoftware(wxCommandEvent& event); // ฟังก์ชันสำหรับจัดการคลิกเมนู About
     void OnComportSettings(wxCommandEvent& event); // ฟังก์ชันสำหรับจัดการคลิกเมนู Comport Settings
     void OnManualFlowsystem(wxCommandEvent& event); //
-	void OnBLEDeviceSettings(wxCommandEvent& event); // ฟังก์ชันสำหรับจัดการคลิกเมนู BLEDevice Settings
-
+	
     wxStaticBitmap* staticBitmap; // สำหรับแสดงรูป
     wxImage image;               // รูปภาพต้นฉบับ
     void OnResize(wxSizeEvent& event); // ฟังก์ชันจัดการเมื่อขนาดหน้าต่างเปลี่ยนแปลง
