@@ -30,6 +30,7 @@
 #include <algorithm> 
 #include <queue>
 #include <optional>
+#include <condition_variable>
 
 using namespace std;
 using namespace boost::asio;
@@ -49,6 +50,9 @@ public:
 	//-------------------------------------------------------------------------------------------------
     void readModbusWorker();
     void readBluetoothWorker();
+    void StartReadTimer();
+    void StopReadTimer();
+    //void readSensorsWorker();
     //------------------------------------------------------------------------------------------------
     double calculatePID(double setpointValue, double currentValue);
     wxDECLARE_EVENT_TABLE();
@@ -69,8 +73,12 @@ private:
 
     boost::lockfree::queue<DataEntry> refFlowBuffer{ 10240 }; // กำหนดขนาด 1024
 	boost::lockfree::queue<DataEntry> actFlowBuffer{ 10240 }; // กำหนดขนาด 1024
-    std::thread modbusThread;
-    std::thread bluetoothThread;
+    thread modbusThread;
+    thread bluetoothThread;
+    thread readTimerThread;
+    mutex timerMutex;
+    condition_variable timerCv;
+    //thread sensorThread;
     //----------------------------------------------------------------------------------------------------------------------------------
     //variable in use in ontime function
     const int MIN_SETPOINT = 0;
@@ -105,7 +113,7 @@ private:
     wxButton* doneButton;
 	//------------------------------------------------------------------------------------------------
     bool CheckAndLoadPorts(const string& fileName, vector<string>& ports);
-    void OnReadTimer(wxTimerEvent& event);    // ฟังก์ชันเรียกเมื่อ timerRead ทำงาน
+    void OnReadTimer();    // ฟังก์ชันเรียกเมื่อ timerRead ทำงาน
    	//------------------------------------------------------------------------------------------------
     serial_port serialCtx;
     modbus_t* modbusCtx;
