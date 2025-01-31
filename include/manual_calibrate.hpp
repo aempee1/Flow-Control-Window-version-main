@@ -14,6 +14,7 @@
 #include "serial_utils.hpp"
 
 #include <boost/lockfree/queue.hpp>
+#include <boost/thread/thread.hpp>
 
 #include <atomic>
 #include <fstream>
@@ -31,6 +32,7 @@
 #include <queue>
 #include <optional>
 #include <condition_variable>
+
 
 using namespace std;
 using namespace boost::asio;
@@ -73,10 +75,15 @@ private:
 
     boost::lockfree::queue<DataEntry> refFlowBuffer{ 10240 }; // กำหนดขนาด 1024
 	boost::lockfree::queue<DataEntry> actFlowBuffer{ 10240 }; // กำหนดขนาด 1024
+	//------------------------------------------------------------------------------------------------
     thread modbusThread;
     thread bluetoothThread;
     thread readTimerThread;
+	thread displayTimerThread;
+    thread pidCalculationThread;  // เพิ่ม Thread คำนวณ PID
+	//----------------------------------------------------------------------------------------------------------------------------------
     mutex timerMutex;
+	//----------------------------------------------------------------------------------------------------------------------------------
     condition_variable timerCv;
     //thread sensorThread;
     //----------------------------------------------------------------------------------------------------------------------------------
@@ -114,6 +121,7 @@ private:
 	//------------------------------------------------------------------------------------------------
     bool CheckAndLoadPorts(const string& fileName, vector<string>& ports);
     void OnReadTimer();    // ฟังก์ชันเรียกเมื่อ timerRead ทำงาน
+    void OnDisplayTimer();
    	//------------------------------------------------------------------------------------------------
     serial_port serialCtx;
     modbus_t* modbusCtx;

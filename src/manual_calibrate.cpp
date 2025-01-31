@@ -297,9 +297,15 @@ void ManualCalibrationDialog::StartReadTimer() {
     readTimerThread = std::thread([this]() {
         while (keepRunning && timerRunning) {
             OnReadTimer();  // เรียกใช้งานฟังก์ชันที่เคยทำใน wxTimer
-            // รอ 200ms หรือจนกว่าจะมีการเปลี่ยนแปลงค่า keepRunning
             std::unique_lock<std::mutex> lock(timerMutex);
-            timerCv.wait_for(lock, std::chrono::milliseconds(200), [this]() { return !keepRunning || !timerRunning; });
+            timerCv.wait_for(lock, std::chrono::milliseconds(500), [this]() { return !keepRunning || !timerRunning; });
+        }
+        });
+    displayTimerThread = std::thread([this]() {
+        while (keepRunning && timerRunning) {
+            OnDisplayTimer();  // เรียกใช้งานฟังก์ชันที่เคยทำใน wxTimer
+            std::unique_lock<std::mutex> lock(timerMutex);
+            timerCv.wait_for(lock, std::chrono::milliseconds(500), [this]() { return !keepRunning || !timerRunning; });
         }
         });
 }
@@ -309,21 +315,28 @@ void ManualCalibrationDialog::StopReadTimer() {
     if (readTimerThread.joinable()) {
         readTimerThread.join();  // รอให้ thread จบการทำงาน
     }
+    if (displayTimerThread.joinable()) {
+        displayTimerThread.join();  // รอให้ thread จบการทำงาน
+    }
 }
 void ManualCalibrationDialog::readModbusWorker() {
     auto nextTime = std::chrono::steady_clock::now();
     while (keepRunning) {
         float localRefFlowValue = 0.0f;
         {
-            std::lock_guard<std::mutex> lock(dataMutex);
+            //std::lock_guard<std::mutex> lock(dataMutex);
             rc = modbus_read_registers(modbusCtx, 6, 2, refFlow);
             if (rc != -1) {
                 memcpy(&localRefFlowValue, refFlow, sizeof(localRefFlowValue));
                 localRefFlowValue = std::round(localRefFlowValue * 1000.0) / 1000.0;
             }
         }
+        {
+            std::lock_guard<std::mutex> lock(dataMutex);
+            refFlowValue = localRefFlowValue;
+        }
         refFlowBuffer.push({ localRefFlowValue });      
-        std::this_thread::sleep_for(std::chrono::milliseconds(100)); // Delay 200ms
+        boost::this_thread::sleep(boost::posix_time::milliseconds(100));
         if (!keepRunning) {  // ตรวจสอบ keepRunning หลังการหน่วงเวลา
             break;  // ออกจาก loop ถ้า keepRunning เป็น false
         }
@@ -334,45 +347,64 @@ void ManualCalibrationDialog::readBluetoothWorker() {
     while (keepRunning) {
         float localActFlowValue = 0.0f;
         {
-            std::lock_guard<std::mutex> lock(dataMutex);
+            //std::lock_guard<std::mutex> lock(dataMutex);
             localActFlowValue = sendAndReceiveBetweenPorts(BLECtx);
         }
         actFlowBuffer.push({ localActFlowValue });
-        std::this_thread::sleep_for(std::chrono::milliseconds(100)); // Delay 200ms
+        {
+            std::lock_guard<std::mutex> lock(dataMutex);
+            actFlowValue = localActFlowValue;
+        }
+        boost::this_thread::sleep(boost::posix_time::milliseconds(100));
         if (!keepRunning) {  // ตรวจสอบ keepRunning หลังการหน่วงเวลา
             break;  // ออกจาก loop ถ้า keepRunning เป็น false
         }
     }
 }
-//Thread สำหรับ Timer (200ms)
 void ManualCalibrationDialog::OnReadTimer() {
     DataEntry actEntry, refEntry;
     static bool startedTimer = false; // ตัวแปรใหม่เพื่อเก็บสถานะการเริ่มนับเวลา
-
-    while (!refFlowBuffer.empty() && !actFlowBuffer.empty()) {
-        // ดึงข้อมูลจาก buffer (pop ข้อมูลแล้วออกจาก buffer)
-        bool hasRef = refFlowBuffer.pop(refEntry);
-        bool hasAct = actFlowBuffer.pop(actEntry);
-
-        if (hasRef && hasAct) {
-            auto currentTime = std::chrono::steady_clock::now();
-
-            // ตรวจสอบว่าเริ่มนับเวลาแล้วหรือยัง
-            if (!startedTimer) {
-                initialTime = currentTime; // ตั้งค่าเวลาเริ่มต้นตอนนี้
-                startedTimer = true; // ปรับสถานะให้เริ่มนับเวลาแล้ว
-            }
-
-            auto elapsedTime = std::chrono::duration_cast<std::chrono::milliseconds>(currentTime - initialTime).count();
-
-            // Push ข้อมูลลง Vector
-            refData.push_back(refEntry.Flow);
-            actData.push_back(actEntry.Flow);
-            pushTimestamps.push_back(elapsedTime);
+    // ดึงข้อมูล 1 ตัวจาก buffer (pop แค่ 1 ตัวจากแต่ละ buffer เท่านั้น)
+    bool hasRef = refFlowBuffer.pop(refEntry);
+    bool hasAct = actFlowBuffer.pop(actEntry);
+    //if (hasRef && hasAct) 
+    {
+        auto currentTime = std::chrono::steady_clock::now();
+        // ตรวจสอบว่าเริ่มนับเวลาแล้วหรือยัง
+        if (!startedTimer) {
+            initialTime = currentTime; // ตั้งค่าเวลาเริ่มต้นตอนนี้
+            startedTimer = true; // ปรับสถานะให้เริ่มนับเวลาแล้ว
         }
+        auto elapsedTime = std::chrono::duration_cast<std::chrono::milliseconds>(currentTime - initialTime).count();
+        // Push ข้อมูลลง Vector
+        refData.push_back(refEntry.Flow);
+        actData.push_back(actEntry.Flow);
+        pushTimestamps.push_back(elapsedTime);
     }
 }
-
+void ManualCalibrationDialog::OnDisplayTimer() {
+    // ดึงค่าล่าสุดจาก buffer
+    DataEntry refEntry, actEntry;
+    bool hasRef = refFlowBuffer.pop(refEntry);
+    bool hasAct = actFlowBuffer.pop(actEntry);
+    // คำนวณ Error Value
+    if (actFlowValue != 0.0f) {
+        errorValue_percentage = 100.0f - (refFlowValue * 100.0f) / actFlowValue;
+    }
+    else {
+        errorValue_percentage = 0.0f; // ป้องกันหารด้วย 0
+    }
+    // คำนวณค่า Act. Flow โดยใช้ PID
+    pidOutput += calculatePID(setpoint, refFlowValue);
+    // ป้องกันค่า PID Output เกินขอบเขตที่กำหนด
+    pidOutput = std::clamp<double>(pidOutput, 0.3f, 1.5f);
+    // ส่งค่า PID Output ไปที่ Serial Port
+    set_current(serialCtx, pidOutput);
+    // แสดงผลใน GUI
+    refFlowInput->SetValue(wxString::Format("%.1f", refFlowValue));
+    actFlowInput->SetValue(wxString::Format("%.1f", actFlowValue));
+    errorInput->SetValue(wxString::Format("%.1f", errorValue_percentage));
+}
 //----------------------------------------------------------------------------------------------------------------------------------
 // Bind Event Table
 wxBEGIN_EVENT_TABLE(ManualCalibrationDialog, wxDialog)

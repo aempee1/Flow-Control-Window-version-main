@@ -33,7 +33,6 @@ float sendAndReceiveBetweenPorts(const string& portSend, unsigned int baudrate) 
 
         vector<uint8_t> responseBuffer(12); // ต้องการอ่านให้ครบ 12 ไบต์
         read(serialSend, buffer(responseBuffer));
-
         // แสดงผลข้อมูลที่ได้รับ
         if (!responseBuffer.empty()) {
             std::ostringstream trimmedHex;
