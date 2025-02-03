@@ -33,13 +33,10 @@
 #include <optional>
 #include <condition_variable>
 
-
 using namespace std;
 using namespace boost::asio;
 
 std::string formatTimestamp(long milliseconds);
-//----------------------------------------------------------------------------------------------------------------------------------
-tuple<string,string,string> ReadPortsFromFile(const string& fileName) ;
 //----------------------------------------------------------------------------------------------------------------------------------
 class ManualCalibrationDialog : public wxDialog {
 public:
@@ -52,29 +49,40 @@ public:
 	//-------------------------------------------------------------------------------------------------
     void readModbusWorker();
     void readBluetoothWorker();
+	//------------------------------------------------------------------------------------------------  
+	void calculatePIDWorker();
+    double calculatePID(double setpointValue, double currentValue);
+	//------------------------------------------------------------------------------------------------
     void StartReadTimer();
     void StopReadTimer();
-    //void readSensorsWorker();
     //------------------------------------------------------------------------------------------------
-    double calculatePID(double setpointValue, double currentValue);
-    wxDECLARE_EVENT_TABLE();
-
+    bool CheckAndLoadPorts(const string& fileName, vector<string>& ports);
+    tuple<string, string, string> ReadPortsFromFile(const string& fileName);
+    //------------------------------------------------------------------------------------------------
+    void OnReadTimer();
+    void OnDisplayTimer();
+    //------------------------------------------------------------------------------------------------
+    serial_port InitialSerial(io_service& io, const string& port_name);
+    modbus_t* InitialModbus(const char* modbus_port);
+	//------------------------------------------------------------------------------------------------
+    
 private:
+    wxDECLARE_EVENT_TABLE();
+	//------------------------------------------------------------------------------------------------
     std::chrono::steady_clock::time_point initialTime;
-    // Struct for data entries
+	//------------------------------------------------------------------------------------------------
     struct DataEntry {
         float Flow;
     };
-    // variable in use in readValuesWorker function
+    boost::lockfree::queue<DataEntry> refFlowBuffer{ 10240 }; // กำหนดขนาด 1024
+    boost::lockfree::queue<DataEntry> actFlowBuffer{ 10240 }; // กำหนดขนาด 1024
+	//------------------------------------------------------------------------------------------------
     float refFlowValue = 0.0;
     float actFlowValue = 0.0;
     float errorValue_percentage = 0.0;
-
+	//------------------------------------------------------------------------------------------------
     deque<double> setpointData, actData, errorData, refData;
     deque<long> pushTimestamps; // Vector to store push timestamps
-
-    boost::lockfree::queue<DataEntry> refFlowBuffer{ 10240 }; // กำหนดขนาด 1024
-	boost::lockfree::queue<DataEntry> actFlowBuffer{ 10240 }; // กำหนดขนาด 1024
 	//------------------------------------------------------------------------------------------------
     thread modbusThread;
     thread bluetoothThread;
@@ -83,32 +91,26 @@ private:
     thread pidCalculationThread;  // เพิ่ม Thread คำนวณ PID
 	//----------------------------------------------------------------------------------------------------------------------------------
     mutex timerMutex;
+    mutex dataMutex;
 	//----------------------------------------------------------------------------------------------------------------------------------
     condition_variable timerCv;
-    //thread sensorThread;
     //----------------------------------------------------------------------------------------------------------------------------------
     //variable in use in ontime function
     const int MIN_SETPOINT = 0;
     const int MAX_SETPOINT = 50;
-    //-----------------------------
-    double integral = 0.0;
-    double previousError = 0.0;
-    double pidOutput = 0.3;
     //------------------------------------------------------------------------------------------------
-    // เพิ่มค่าเริ่มต้นของ PID Controller 
     //const double Kp = 0.007981535232; // for voltage control
     const double Kp = 9.03223474630576e-4; // for current control
     const double Ki = 0.0271542857142857;
     const double Kd = 0.0020869232374223;
+    double integral = 0.0;
+    double previousError = 0.0;
+    double pidOutput = 0.3;
+    int setpoint;
 	//------------------------------------------------------------------------------------------------
-    uint16_t refFlow[4];
-    int rc;
-	//------------------------------------------------------------------------------------------------
-    std::mutex dataMutex;
-	//------------------------------------------------------------------------------------------------
-    std::vector<std::string> timestampData; // เก็บข้อมูล Timestamp
-    std::vector<long> elapsedTimestamps; // เวลาที่ผ่านไปจากการอ่านครั้งแรก (ms)
-    std::vector<long> pushIntervals;    // เก็บระยะห่างระหว่างการ Push (หน่วย: มิลลิวินาที)
+    vector<std::string> timestampData; // เก็บข้อมูล Timestamp
+    vector<long> elapsedTimestamps; // เวลาที่ผ่านไปจากการอ่านครั้งแรก (ms)
+    vector<long> pushIntervals;    // เก็บระยะห่างระหว่างการ Push (หน่วย: มิลลิวินาที)
 	//------------------------------------------------------------------------------------------------
     wxTimer timerRead;   // Timer สำหรับการอ่านค่า
     wxDateTime initialReadTime; // เวลาเริ่มต้นสำหรับการคำนวณ Elapsed Time
@@ -119,23 +121,18 @@ private:
     wxButton* showGraphButton;
     wxButton* doneButton;
 	//------------------------------------------------------------------------------------------------
-    bool CheckAndLoadPorts(const string& fileName, vector<string>& ports);
-    void OnReadTimer();    // ฟังก์ชันเรียกเมื่อ timerRead ทำงาน
-    void OnDisplayTimer();
-   	//------------------------------------------------------------------------------------------------
+    wxTextCtrl* setFlowInput;
+    wxTextCtrl* refFlowInput;
+    wxTextCtrl* actFlowInput;
+    wxTextCtrl* errorInput;
+	//------------------------------------------------------------------------------------------------
     serial_port serialCtx;
     modbus_t* modbusCtx;
     string BLECtx;
-    serial_port InitialSerial(io_service& io, const string& port_name);
-    modbus_t* InitialModbus(const char* modbus_port);
-
-protected:
-    int setpoint ;
+    uint16_t refFlow[4];
+    int rc;
 	//------------------------------------------------------------------------------------------------
-    wxTextCtrl *setFlowInput;
-    wxTextCtrl *refFlowInput;
-    wxTextCtrl *actFlowInput;
-    wxTextCtrl *errorInput;
+    uint32_t SerialNumber;
 	//------------------------------------------------------------------------------------------------
 };
 #endif // MANUAL_CALIBRATE_HPP
