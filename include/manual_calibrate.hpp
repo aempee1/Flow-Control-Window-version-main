@@ -13,9 +13,11 @@
 #include "modbus_utils.hpp"
 #include "serial_utils.hpp"
 
+
 #include <boost/lockfree/queue.hpp>
 #include <boost/thread/thread.hpp>
 
+#include <sys/stat.h>
 #include <atomic>
 #include <fstream>
 #include <string>
@@ -32,11 +34,20 @@
 #include <queue>
 #include <optional>
 #include <condition_variable>
+#include <cmath>
+#include <stop_token>
+
+#ifdef _WIN32
+#include <windows.h>
+#endif // 
+
 
 using namespace std;
 using namespace boost::asio;
 
 std::string formatTimestamp(long milliseconds);
+
+
 //----------------------------------------------------------------------------------------------------------------------------------
 class ManualCalibrationDialog : public wxDialog {
 public:
@@ -53,8 +64,8 @@ public:
 	void calculatePIDWorker();
     double calculatePID(double setpointValue, double currentValue);
 	//------------------------------------------------------------------------------------------------
-    void StartReadTimer();
-    void StopReadTimer();
+	void StartThread();
+    void StopThread();
     //------------------------------------------------------------------------------------------------
     bool CheckAndLoadPorts(const string& fileName, vector<string>& ports);
     tuple<string, string, string> ReadPortsFromFile(const string& fileName);
@@ -65,7 +76,12 @@ public:
     serial_port InitialSerial(io_service& io, const string& port_name);
     modbus_t* InitialModbus(const char* modbus_port);
 	//------------------------------------------------------------------------------------------------
-    
+    static const size_t DUMP_THRESHOLD = 500;
+    std::string dumpFilePath;
+    size_t totalEntriesWritten = 0;
+    void dumpDataToFile();
+
+
 private:
     wxDECLARE_EVENT_TABLE();
 	//------------------------------------------------------------------------------------------------
@@ -74,21 +90,30 @@ private:
     struct DataEntry {
         float Flow;
     };
+    
     boost::lockfree::queue<DataEntry> refFlowBuffer{ 10240 }; // กำหนดขนาด 1024
     boost::lockfree::queue<DataEntry> actFlowBuffer{ 10240 }; // กำหนดขนาด 1024
+    //------------------------------------------------------------------------------------------------
+    void clearQueue(boost::lockfree::queue<DataEntry>& queue) {
+        DataEntry dummy;
+        while (queue.pop(dummy)) {
+            // ลบค่าทีละตัวจนกว่าคิวจะว่าง
+        }
+    }
 	//------------------------------------------------------------------------------------------------
-    float refFlowValue = 0.0;
-    float actFlowValue = 0.0;
-    float errorValue_percentage = 0.0;
+    atomic<float> refFlowValue{ 0.0 };
+    atomic<float> actFlowValue{ 0.0 };
+    atomic<float> errorValue_percentage{ 0.0 };
 	//------------------------------------------------------------------------------------------------
-    deque<double> setpointData, actData, errorData, refData;
+    deque<float> setpointData, actData, errorData, refData;
     deque<long> pushTimestamps; // Vector to store push timestamps
 	//------------------------------------------------------------------------------------------------
     thread modbusThread;
     thread bluetoothThread;
     thread readTimerThread;
 	thread displayTimerThread;
-    thread pidCalculationThread;  // เพิ่ม Thread คำนวณ PID
+    thread pidCalculationThread; 
+    thread clearData;   
 	//----------------------------------------------------------------------------------------------------------------------------------
     mutex timerMutex;
     mutex dataMutex;

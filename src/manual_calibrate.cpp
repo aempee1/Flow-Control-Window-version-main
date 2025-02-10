@@ -4,8 +4,8 @@ using namespace boost::asio;
 //----------------------------------------------------------------------------------------------------------------------------------
 static auto initialTime = std::chrono::steady_clock::now();
 io_service io; 
-atomic<bool> keepRunning{false};
-bool timerRunning = false;
+std::atomic<bool> timerRunning{ false };
+static bool startedTimer = false; // ตัวแปรใหม่เพื่อเก็บสถานะการเริ่มนับเวลา
 //----------------------------------------------------------------------------------------------------------------------------------
 string formatTimestamp(long milliseconds) {
     /*long hours = milliseconds / 3600000;
@@ -22,10 +22,17 @@ string formatTimestamp(long milliseconds) {
         << std::setw(3) << std::setfill('0') << millis;
     return oss.str();
 }
+#include <Windows.h>
+void SetThreadName(const std::string& name) {
+    HRESULT hr = SetThreadDescription(GetCurrentThread(), std::wstring(name.begin(), name.end()).c_str());
+    if (FAILED(hr)) {
+        std::cerr << "Failed to set thread name: " << name << std::endl;
+    }
+}
 //----------------------------------------------------------------------------------------------------------------------------------
 ManualCalibrationDialog::ManualCalibrationDialog(wxWindow* parent)
     : wxDialog(parent, wxID_ANY, "Manual Calibration", wxDefaultPosition, wxSize(400, 400), wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER),
-    setpoint(0),modbusCtx(nullptr), serialCtx(io),BLECtx() {
+    setpoint(0),modbusCtx(nullptr), serialCtx(io),BLECtx("") {
     wxBoxSizer* mainSizer = new wxBoxSizer(wxVERTICAL);
     wxFlexGridSizer* gridSizer = new wxFlexGridSizer(4, 3, 10, 10);
     // Set Flow Row
@@ -33,7 +40,6 @@ ManualCalibrationDialog::ManualCalibrationDialog(wxWindow* parent)
     setFlowInput = new wxTextCtrl(this, wxID_ANY);
     gridSizer->Add(setFlowInput, 1, wxEXPAND);
     gridSizer->Add(new wxStaticText(this, wxID_ANY, "m3/h"), 0, wxALIGN_CENTER);
-
     // Ref. Flow Row
     gridSizer->Add(new wxStaticText(this, wxID_ANY, "Ref. Flow:"), 0, wxALIGN_CENTER_VERTICAL | wxALIGN_RIGHT);
     refFlowInput = new wxTextCtrl(this, wxID_ANY);
@@ -46,22 +52,18 @@ ManualCalibrationDialog::ManualCalibrationDialog(wxWindow* parent)
     actFlowInput->SetEditable(false); // Make the field read-only
     gridSizer->Add(actFlowInput, 1, wxEXPAND);
     gridSizer->Add(new wxStaticText(this, wxID_ANY, "m3/h"), 0, wxALIGN_CENTER_VERTICAL);
-
     // Error Row
     gridSizer->Add(new wxStaticText(this, wxID_ANY, "Error:"), 0, wxALIGN_CENTER_VERTICAL | wxALIGN_RIGHT);
     errorInput = new wxTextCtrl(this, wxID_ANY);
     errorInput->SetEditable(false);
     gridSizer->Add(errorInput, 1, wxEXPAND);
     gridSizer->Add(new wxStaticText(this, wxID_ANY, "%"), 0, wxALIGN_CENTER_VERTICAL);
-
     // Center Grid
     wxBoxSizer* gridCenterSizer = new wxBoxSizer(wxHORIZONTAL);
     gridCenterSizer->Add(gridSizer, 0, wxALIGN_CENTER);
     mainSizer->Add(gridCenterSizer, 0, wxALL | wxALIGN_CENTER, 20);
-
     // Control Buttons
     wxBoxSizer* controlButtonSizer = new wxBoxSizer(wxVERTICAL);
-
     // Row for Start and Stop Buttons
     wxBoxSizer* startStopRowSizer = new wxBoxSizer(wxHORIZONTAL);
     startButton = new wxButton(this, 1011, "Start");
@@ -69,14 +71,8 @@ ManualCalibrationDialog::ManualCalibrationDialog(wxWindow* parent)
     startStopRowSizer->Add(startButton, 0, wxALL | wxALIGN_CENTER, 5);
     startStopRowSizer->Add(stopButton, 0, wxALL | wxALIGN_CENTER, 5);
     controlButtonSizer->Add(startStopRowSizer, 0, wxALIGN_CENTER | wxALL, 5);
-
-    // Row for Show Graph Button
-    showGraphButton = new wxButton(this, 1013, "Graph Logging");
-    controlButtonSizer->Add(showGraphButton, 2, wxALL | wxALIGN_CENTER, 5);
-
     // Disable Stop Button Initially
     stopButton->Disable();
-
     // Add Control Buttons to Main Sizer
     mainSizer->Add(controlButtonSizer, 0, wxALIGN_CENTER | wxALL, 10);
     // Done Button
@@ -104,18 +100,10 @@ ManualCalibrationDialog::ManualCalibrationDialog(wxWindow* parent)
         wxMessageBox("Failed to initialize Modbus.", "Error", wxOK | wxICON_ERROR, this);
         return;
     }
-    SerialNumber = sendRequestSerialNumber(BLECtx);
-	if (SerialNumber == 0) {
-		wxMessageBox("Failed to get Serial Number.", "Error", wxOK | wxICON_ERROR, this);
-		return;
-	}
 }
 ManualCalibrationDialog::~ManualCalibrationDialog() {
-    keepRunning = false; // กันการรันต่อหลังจากปิด
-    /*if (sensorThread.joinable()) sensorThread.join();*/
-    if (modbusThread.joinable()) modbusThread.join();
-    if (bluetoothThread.joinable()) bluetoothThread.join();
-	if (pidCalculationThread.joinable()) pidCalculationThread.join();
+    timerRunning = false;
+    StopThread();
     if (modbusCtx) {
         modbus_close(modbusCtx);
         modbus_free(modbusCtx);
@@ -123,7 +111,6 @@ ManualCalibrationDialog::~ManualCalibrationDialog() {
     if (serialCtx.is_open()) {
         serialCtx.close();
     }
- 
 }
 //----------------------------------------------------------------------------------------------------------------------------------
 serial_port ManualCalibrationDialog::InitialSerial(io_service& io, const string& port_name)
@@ -134,7 +121,6 @@ serial_port ManualCalibrationDialog::InitialSerial(io_service& io, const string&
     serial.set_option(serial_port_base::parity(serial_port_base::parity::none));
     serial.set_option(serial_port_base::stop_bits(serial_port_base::stop_bits::one));
     serial.set_option(serial_port_base::flow_control(serial_port_base::flow_control::none));
-
     if (!serial.is_open())
     {
         // cerr << "Failed to open serial port!" << endl;
@@ -199,28 +185,63 @@ double ManualCalibrationDialog::calculatePID(double setpointValue, double curren
 }
 //----------------------------------------------------------------------------------------------------------------------------------
 void ManualCalibrationDialog::OnDoneButtonClick(wxCommandEvent& event) {
+    // ฟังก์ชันสำหรับรอ thread ด้วย timeout
+    auto joinThreadWithTimeout = [](std::thread& t, int timeout_ms) {
+        if (t.joinable()) {
+            std::future<void> future = std::async(std::launch::async, &std::thread::join, &t);
+            if (future.wait_for(std::chrono::milliseconds(timeout_ms)) == std::future_status::timeout) {
+                // จัดการกรณี thread ค้าง
+                wxMessageBox("Thread timeout occurred", "Warning", wxOK | wxICON_WARNING);
+                return false;
+            }
+        }
+        return true;
+        };
+    timerRunning = false;
+    // รอ thread ด้วย timeout
+    if (!joinThreadWithTimeout(modbusThread, 1000)) {
+        // จัดการกรณี thread ค้าง
+    }
+    if (!joinThreadWithTimeout(bluetoothThread, 1000)) {
+        // จัดการกรณี thread ค้าง
+    }
+    if (!joinThreadWithTimeout(pidCalculationThread, 1000)) {
+        // จัดการกรณี thread ค้าง
+    }
+    // หยุด Thread Timer
+    StopThread();
+    stopButton->Disable();
+    startButton->Enable();
+    setFlowInput->SetEditable(true);
+    // ลบไฟล์ dump หลังจากเขียนเสร็จ
+    if (!dumpFilePath.empty()) {
+        std::remove(dumpFilePath.c_str());
+        dumpFilePath.clear();
+    }
+    pushTimestamps.clear();
+    refData.clear();
+    actData.clear();
+    startedTimer = false;
+    clearQueue(refFlowBuffer);
+    clearQueue(actFlowBuffer);
+    totalEntriesWritten = 0;
     // ปิด dialog
     EndModal(wxID_OK);
+
 }
 void ManualCalibrationDialog::OnStartButtonClick(wxCommandEvent& event) {
     wxString inputStr = setFlowInput->GetValue();
     long value;
     if (inputStr.ToLong(&value)) {
         setpoint = static_cast<int>(value);
-        keepRunning = true;
-        // เริ่ม Thread Modbus และ Bluetooth
-        modbusThread = thread(&ManualCalibrationDialog::readModbusWorker, this);
-        bluetoothThread = thread(&ManualCalibrationDialog::readBluetoothWorker, this);
-        pidCalculationThread = thread(&ManualCalibrationDialog::calculatePIDWorker, this);
-        // เริ่ม Timer
-        StartReadTimer();
-		//----------------------------------------------------------------------------------------------------------------------------------
+        timerRunning = true;
+		StartThread();
+        // ปิดการใช้งานปุ่ม Start และเปิดใช้งานปุ่ม Stop
         startButton->Disable();
         stopButton->Enable();
         setFlowInput->SetEditable(false);
-
     }
-    else if(value < MIN_SETPOINT || value > MAX_SETPOINT){
+    else if (value < MIN_SETPOINT || value > MAX_SETPOINT) {
         wxMessageBox(wxString::Format("Please enter a value between %d and %d.", MIN_SETPOINT, MAX_SETPOINT), "Invalid Input", wxOK | wxICON_ERROR, this);
     }
     else {
@@ -228,12 +249,8 @@ void ManualCalibrationDialog::OnStartButtonClick(wxCommandEvent& event) {
     }
 }
 void ManualCalibrationDialog::OnStopButtonClick(wxCommandEvent& event) {
-	keepRunning = false;
-    if (modbusThread.joinable()) modbusThread.join();
-    if (bluetoothThread.joinable()) bluetoothThread.join();
-    if (pidCalculationThread.joinable()) pidCalculationThread.join();
     // หยุด Thread Timer
-    StopReadTimer();
+    StopThread();
     stopButton->Disable();
     startButton->Enable();
     setFlowInput->SetEditable(true); 
@@ -245,6 +262,11 @@ void ManualCalibrationDialog::OnStopButtonClick(wxCommandEvent& event) {
     oss << std::put_time(&tm, "%Y%m%d");  // yyyyMMdd
     std::string dateStr = oss.str();
     std::ostringstream fileNameStream;
+    SerialNumber = sendRequestSerialNumber(BLECtx);
+    if (SerialNumber == 0) {
+        wxMessageBox("Failed to get Serial Number.", "Error", wxOK | wxICON_ERROR, this);
+        return;
+    }
     fileNameStream << "log_SN" << std::setfill('0') << std::setw(8) << SerialNumber << "_" << dateStr << ".csv";
     string file_name = fileNameStream.str();
 	//----------------------------------------------------------------------------------------------------------------------------------
@@ -270,6 +292,32 @@ void ManualCalibrationDialog::OnStopButtonClick(wxCommandEvent& event) {
         }
         // Write CSV header
         outFile << "Time (s),Reference Flow (l/min),Active Flow (l/min),Error (%)\n";
+        // ถ้ามีไฟล์ dump ให้อ่านข้อมูลจากไฟล์ dump ก่อน
+        if (!dumpFilePath.empty()) {
+            std::ifstream dumpFile(dumpFilePath);
+            if (dumpFile.is_open()) {
+                std::string line;
+                while (std::getline(dumpFile, line)) {
+                    std::stringstream ss(line);
+                    std::string timestamp, ref, act;
+
+                    std::getline(ss, timestamp, ',');
+                    std::getline(ss, ref, ',');
+                    std::getline(ss, act, ',');
+
+                    float refValue = std::stof(ref);
+                    float actValue = std::stof(act);
+                    float errorValue_percentage = (actValue != 0.0f) ?
+                        ((refValue - actValue) / refValue) * 100.0f : 0.0f;
+
+                    outFile << formatTimestamp(std::stoll(timestamp)) << ","
+                        << ref << ","
+                        << act << ","
+                        << abs(errorValue_percentage) << "\n";
+                }
+                dumpFile.close();
+            }
+        }
         // Write data
         for (size_t i = 0; i < refData.size(); ++i) {
             float errorValue_percentage = (refData[i] != 0.0f) ?
@@ -281,144 +329,168 @@ void ManualCalibrationDialog::OnStopButtonClick(wxCommandEvent& event) {
         }
 		//----------------------------------------------------------------------------------------------------------------------------------
         outFile.close();
+        // ลบไฟล์ dump หลังจากเขียนเสร็จ
+        if (!dumpFilePath.empty()) {
+            std::remove(dumpFilePath.c_str());
+            dumpFilePath.clear();
+        }
+        pushTimestamps.clear();
+        refData.clear();
+        actData.clear();
+        startedTimer = false;
+		clearQueue(refFlowBuffer);
+		clearQueue(actFlowBuffer);
+        totalEntriesWritten = 0;
         wxMessageBox("Data exported successfully!", "Success", wxOK | wxICON_INFORMATION, this);
     }
 }
 //----------------------------------------------------------------------------------------------------------------------------------
-void ManualCalibrationDialog::StartReadTimer() {
-    timerRunning = true;
+void ManualCalibrationDialog::StartThread() {
+    modbusThread = std::thread([this]() {
+        SetThreadName("modbus thread");
+        while (timerRunning) {
+            readModbusWorker();
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        }
+        });
+    bluetoothThread = std::thread([this]() {
+        SetThreadName("BLE thread");
+        while (timerRunning) {
+            readBluetoothWorker();
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        }
+        });
+    pidCalculationThread = std::thread([this]() {
+        SetThreadName("PID thread");
+        while (timerRunning) {
+            calculatePIDWorker();
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        }
+        });
     readTimerThread = std::thread([this]() {
-        while (keepRunning && timerRunning) {
-            OnReadTimer();  // เรียกใช้งานฟังก์ชันที่เคยทำใน wxTimer
-            std::unique_lock<std::mutex> lock(timerMutex);
-            timerCv.wait_for(lock, std::chrono::milliseconds(500), [this]() { return !keepRunning || !timerRunning; });
+        SetThreadName("Read thread");
+        while (timerRunning) {
+            OnReadTimer();
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
         }
         });
     displayTimerThread = std::thread([this]() {
-        while (keepRunning && timerRunning) {
-            OnDisplayTimer();  // เรียกใช้งานฟังก์ชันที่เคยทำใน wxTimer
-            std::unique_lock<std::mutex> lock(timerMutex);
-            timerCv.wait_for(lock, std::chrono::milliseconds(500), [this]() { return !keepRunning || !timerRunning; });
+        SetThreadName("Display thread");
+        while (timerRunning) {
+            OnDisplayTimer();
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
         }
         });
 }
-void ManualCalibrationDialog::StopReadTimer() {
+void ManualCalibrationDialog::StopThread() {
     timerRunning = false;
     timerCv.notify_all();  // ปลุก thread เพื่อให้ออกจาก wait
+	if (bluetoothThread.joinable()) {
+		bluetoothThread.join();  // รอให้ thread จบการทำงาน
+	}
+	if (modbusThread.joinable()) {
+		modbusThread.join();  // รอให้ thread จบการทำงาน
+	}
     if (readTimerThread.joinable()) {
         readTimerThread.join();  // รอให้ thread จบการทำงาน
     }
     if (displayTimerThread.joinable()) {
         displayTimerThread.join();  // รอให้ thread จบการทำงาน
     }
+	if (pidCalculationThread.joinable()) {
+		pidCalculationThread.join();  // รอให้ thread จบการทำงาน
+	}
 }
 //----------------------------------------------------------------------------------------------------------------------------------
 void ManualCalibrationDialog::readModbusWorker() {
-    auto nextTime = std::chrono::steady_clock::now();
-    while (keepRunning) {
-        float localRefFlowValue = 0.0f;
-        {
-            //std::lock_guard<std::mutex> lock(dataMutex);
-            rc = modbus_read_registers(modbusCtx, 6, 2, refFlow);
-            if (rc != -1) {
-                memcpy(&localRefFlowValue, refFlow, sizeof(localRefFlowValue));
-                localRefFlowValue = std::round(localRefFlowValue * 1000.0) / 1000.0;
-            }
+        std::atomic<float> localRefFlowValue{ 0.0f };
+        rc = modbus_read_registers(modbusCtx, 6, 2, refFlow);
+        if (rc != -1) {
+             memcpy(&localRefFlowValue, refFlow, sizeof(localRefFlowValue));
+             localRefFlowValue.store(std::round(localRefFlowValue.load() * 1000.0) / 1000.0);
         }
-        {
-            std::lock_guard<std::mutex> lock(dataMutex);
-            refFlowValue = localRefFlowValue;
-        }
-        refFlowBuffer.push({ localRefFlowValue });      
-        boost::this_thread::sleep(boost::posix_time::milliseconds(100));
-        if (!keepRunning) {  // ตรวจสอบ keepRunning หลังการหน่วงเวลา
-            break;  // ออกจาก loop ถ้า keepRunning เป็น false
-        }
-    }
+        else {
+             localRefFlowValue.store(0.0f);
+        } 
+        localRefFlowValue.store(refFlowValue.load());
+        refFlowBuffer.push({ localRefFlowValue.load()});
 }
 void ManualCalibrationDialog::readBluetoothWorker() {
-    while (keepRunning) {
-        float localActFlowValue = 0.0f;
-        {
-            //std::lock_guard<std::mutex> lock(dataMutex);
-            localActFlowValue = sendAndReceiveBetweenPorts(BLECtx);
+        atomic<float> localActFlowValue{ 0.0f };
+        localActFlowValue.store(sendAndReceiveBetweenPorts(BLECtx));
+        localActFlowValue.store(actFlowValue.load());
+        actFlowBuffer.push({localActFlowValue.load()});
+     /*  boost::this_thread::sleep(boost::posix_time::milliseconds(100));*/  
+}
+//----------------------------------------------------------------------------------------------------------------------------------
+void ManualCalibrationDialog::dumpDataToFile() {
+    if (refData.size() >= DUMP_THRESHOLD) {
+        if (dumpFilePath.empty()) {
+            // สร้างชื่อไฟล์ dump ชั่วคราว
+            std::ostringstream oss;
+            oss << "temp_dump_" << SerialNumber << "_" << std::time(nullptr) << ".tmp";
+            dumpFilePath = oss.str();
         }
-        actFlowBuffer.push({ localActFlowValue });
-        {
-            std::lock_guard<std::mutex> lock(dataMutex);
-            actFlowValue = localActFlowValue;
+        std::ofstream dumpFile(dumpFilePath, std::ios::app);
+        if (!dumpFile.is_open()) {
+            wxMessageBox("Unable to open dump file for writing.", "Error", wxOK | wxICON_ERROR, this);
+            return;
         }
-        boost::this_thread::sleep(boost::posix_time::milliseconds(100));
-        if (!keepRunning) {  // ตรวจสอบ keepRunning หลังการหน่วงเวลา
-            break;  // ออกจาก loop ถ้า keepRunning เป็น false
+        // เขียนข้อมูลลงในไฟล์ dump
+        for (size_t i = 0; i < refData.size(); ++i) {
+            dumpFile << pushTimestamps[i] << ","
+                << refData[i] << ","
+                << actData[i] << "\n";
         }
+        totalEntriesWritten += refData.size();
+        pushTimestamps.clear();
+        refData.clear();
+        actData.clear();
+        dumpFile.close();
     }
 }
 //----------------------------------------------------------------------------------------------------------------------------------
 void ManualCalibrationDialog::OnReadTimer() {
     DataEntry actEntry, refEntry;
-    static bool startedTimer = false; // ตัวแปรใหม่เพื่อเก็บสถานะการเริ่มนับเวลา
-    // ดึงข้อมูล 1 ตัวจาก buffer (pop แค่ 1 ตัวจากแต่ละ buffer เท่านั้น)
-    bool hasRef = refFlowBuffer.pop(refEntry);
-    bool hasAct = actFlowBuffer.pop(actEntry);
-    //if (hasRef && hasAct) 
-    {
-        auto currentTime = std::chrono::steady_clock::now();
-        // ตรวจสอบว่าเริ่มนับเวลาแล้วหรือยัง
-        if (!startedTimer) {
-            initialTime = currentTime; // ตั้งค่าเวลาเริ่มต้นตอนนี้
-            startedTimer = true; // ปรับสถานะให้เริ่มนับเวลาแล้ว
-        }
-        auto elapsedTime = std::chrono::duration_cast<std::chrono::milliseconds>(currentTime - initialTime).count();
-        // Push ข้อมูลลง Vector
-        refData.push_back(refEntry.Flow);
-        actData.push_back(actEntry.Flow);
-        pushTimestamps.push_back(elapsedTime);
+    refFlowBuffer.pop(refEntry);
+    actFlowBuffer.pop(actEntry);
+    auto currentTime = std::chrono::steady_clock::now();
+    if (!startedTimer) {
+       initialTime = currentTime; 
+       startedTimer = true; 
     }
+    auto elapsedTime = std::chrono::duration_cast<std::chrono::milliseconds>(currentTime - initialTime).count();
+    refData.push_back(refEntry.Flow);
+    actData.push_back(actEntry.Flow);
+    pushTimestamps.push_back(elapsedTime); 
+    dumpDataToFile();
 }
 void ManualCalibrationDialog::OnDisplayTimer() {
-    // ดึงค่าล่าสุดจาก buffer
-    DataEntry refEntry, actEntry;
-    bool hasRef = refFlowBuffer.pop(refEntry);
-    bool hasAct = actFlowBuffer.pop(actEntry);
-    // คำนวณ Error Value
-    if (actFlowValue != 0.0f) {
-        errorValue_percentage = 100.0f - (refFlowValue * 100.0f) / actFlowValue;
+    if (refFlowValue != 0) {
+        errorValue_percentage = ((refFlowValue - actFlowValue) / refFlowValue) * 100.0f;
     }
     else {
         errorValue_percentage = 0.0f; // ป้องกันหารด้วย 0
     }
-    // แสดงผลใน GUI
-    refFlowInput->SetValue(wxString::Format("%.1f", refFlowValue));
-    actFlowInput->SetValue(wxString::Format("%.1f", actFlowValue));
-    errorInput->SetValue(wxString::Format("%.1f", errorValue_percentage));
+    refFlowInput->SetValue(wxString::Format("%.1f", refFlowValue.load()));
+    actFlowInput->SetValue(wxString::Format("%.1f", actFlowValue.load()));
+    errorInput->SetValue(wxString::Format("%.1f", errorValue_percentage.load()));
 }
 //----------------------------------------------------------------------------------------------------------------------------------
 void ManualCalibrationDialog::calculatePIDWorker() {
-    while (keepRunning) {
-        float localRefFlowValue = 0.0f;
-        float localActFlowValue = 0.0f;
-        float localPIDOutput = 0.0f;
-        // ใช้ Mutex เพื่ออ่านค่าล่าสุดจาก Modbus/Bluetooth
-        {
-            std::lock_guard<std::mutex> lock(dataMutex);
-            localRefFlowValue = refFlowValue;
-            localActFlowValue = actFlowValue;
-        }
-        // คำนวณค่า PID
-        localPIDOutput += calculatePID(setpoint, localRefFlowValue);
-        localPIDOutput = std::clamp<double>(localPIDOutput, 0.3f, 1.5f);
-
-        // ใช้ Mutex เพื่ออัปเดตค่าผลลัพธ์ PID อย่างปลอดภัย
-        {
-            std::lock_guard<std::mutex> lock(dataMutex);
-            pidOutput = localPIDOutput;
-        }
-
-        // ส่งค่า PID Output ไปที่ Serial Port
+    // ใช้ atomic สำหรับตัวแปรที่ใช้ร่วมกัน
+    std::atomic<float> localRefFlowValue{0.0f};
+    std::atomic<float> localActFlowValue{0.0f};
+    std::atomic<float> localPIDOutput{0.0f};
+    while (timerRunning) {
+        float localRefFlowValue = refFlowValue.load();
+        float localActFlowValue = actFlowValue.load();
+        float localPIDOutput = calculatePID(setpoint, localRefFlowValue);
+        localPIDOutput = std::clamp<float>(localPIDOutput, 0.3f, 1.5f);
+        pidOutput = localPIDOutput;
+        // เพิ่ม timeout สำหรับการส่งค่า
         set_current(serialCtx, localPIDOutput);
-
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));  // หน่วงเวลาเพื่อให้ CPU ไม่โหลดหนัก
+        /*std::this_thread::sleep_for(std::chrono::milliseconds(100));*/
     }
 }
 // Bind Event Table
@@ -427,4 +499,5 @@ wxBEGIN_EVENT_TABLE(ManualCalibrationDialog, wxDialog)
     EVT_BUTTON(1011, ManualCalibrationDialog::OnStartButtonClick)
     EVT_BUTTON(1012, ManualCalibrationDialog::OnStopButtonClick)
 wxEND_EVENT_TABLE()
+//lockfree 
 //----------------------------------------------------------------------------------------------------------------------------------

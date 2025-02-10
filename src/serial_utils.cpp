@@ -1,5 +1,4 @@
 #include "serial_utils.hpp"
-#include <wx/wx.h>
 using namespace std;
 using namespace boost::asio;
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -62,35 +61,51 @@ uint32_t sendRequestSerialNumber(const string& portSend, unsigned int baudrate) 
 }
 // ฟังก์ชันส่งและรับข้อมูลระหว่างพอร์ต
 float sendAndReceiveBetweenPorts(const string& portSend, unsigned int baudrate) {
-    try {
-        io_context io;
-        serial_port serialSend(io, portSend);
+    io_context io_ble;
+    serial_port serialSend(io_ble, portSend);
+    serialSend.set_option(serial_port_base::baud_rate(baudrate));
+    serialSend.set_option(serial_port_base::character_size(8));
+    // ข้อมูลที่ต้องการส่ง
+    vector<uint8_t> requestDataMessage = { 0x01, 0x09, 0x04, 0x01, 0x01, 0x02, 0x01, 0xED, 0x00 };
 
-        serialSend.set_option(serial_port_base::baud_rate(baudrate));
-        serialSend.set_option(serial_port_base::character_size(8));
+    // ส่งข้อมูล
+    write(serialSend, buffer(requestDataMessage));
 
-        // ข้อมูลที่ต้องการส่ง
-        vector<uint8_t> requestDataMessage = { 0x01, 0x09, 0x04, 0x01, 0x01, 0x02, 0x01, 0xED, 0x00 };
-        // ส่งข้อมูล
-        write(serialSend, buffer(requestDataMessage));
-        vector<uint8_t> responseBuffer(12); // ต้องการอ่านให้ครบ 12 ไบต์
-        read(serialSend, buffer(responseBuffer));
-        // แสดงผลข้อมูลที่ได้รับ
-        if (!responseBuffer.empty()) {
-            std::ostringstream trimmedHex;
-            for (size_t i = 3; i < responseBuffer.size() - 5; ++i) {
-                trimmedHex << hex << setfill('0') << setw(2) << (int)responseBuffer[i];
+    vector<uint8_t> responseBuffer(12); // ต้องการอ่านให้ครบ 12 ไบต์
+    deadline_timer timeout(io_ble);
+    bool dataReceived = false;
+
+    // ตั้งค่า Timeout 1 วินาที
+    timeout.expires_from_now(boost::posix_time::seconds(1));
+
+    // ใช้ async_read กับ timeout
+    async_read(serialSend, buffer(responseBuffer),
+        [&](const boost::system::error_code& error, std::size_t bytes_transferred) {
+            if (!error && bytes_transferred == responseBuffer.size()) {
+                dataReceived = true;
             }
-            float parsedValue = parseMeaValueStructure(trimmedHex.str());
-            parsedValue = std::round(parsedValue * 1000.0f) / 1000.0f;
-            return parsedValue;
-        }else {
-                cout << "No data received from " << portSend << "." << endl;
-                return 0;
-            }
-            
-    }catch (const std::exception& e) {
-        cerr << "Error: " << e.what() << endl;
+        });
+
+    // รัน event loop จนกว่าจะได้รับข้อมูล หรือ Timeout
+    io_ble.run();
+
+    if (!dataReceived) {
+
+        return 0; // Timeout เกิน 1 วินาที
+    }
+
+    // แสดงผลข้อมูลที่ได้รับ
+    if (!responseBuffer.empty()) {
+        std::ostringstream trimmedHex;
+        for (size_t i = 3; i < responseBuffer.size() - 5; ++i) {
+            trimmedHex << hex << setfill('0') << setw(2) << (int)responseBuffer[i];
+        }
+        float parsedValue = parseMeaValueStructure(trimmedHex.str());
+        parsedValue = std::round(parsedValue * 1000.0f) / 1000.0f;
+        return parsedValue;
+    }
+    else {
+      
         return 0;
     }
 }

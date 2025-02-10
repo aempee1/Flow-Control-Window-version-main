@@ -1,9 +1,11 @@
 cmake_minimum_required(VERSION 3.10)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 project(MyWxApp)
+
+# เพิ่มตรงส่วนบนของไฟล์หลัง project(MyWxApp)
 
 # กำหนดไดเรกทอรีที่เก็บไฟล์ .cpp และ .hpp
 include_directories( ./include )
@@ -40,12 +42,15 @@ find_package(Boost REQUIRED COMPONENTS system asio)
 # ค้นหา libmodbus
 find_package(libmodbus CONFIG REQUIRED)
 
+# ค้นหา Matplot++
 find_package(Matplot++ CONFIG REQUIRED)
 
+find_package(implot CONFIG REQUIRED)
 
 # เพิ่มไฟล์ต้นฉบับ
-add_executable(MyWxApp main.cpp src/modbus_utils.cpp src/serial_utils.cpp src/comport_setting.cpp src/mainwindow_properties.cpp src/manual_calibrate.cpp src/mathplot.cpp )
+add_executable(MyWxApp WIN32 main.cpp src/modbus_utils.cpp src/serial_utils.cpp src/comport_setting.cpp src/mainwindow_properties.cpp src/manual_calibrate.cpp src/mathplot.cpp)
 
+set_target_properties(MyWxApp PROPERTIES LINK_FLAGS "/SUBSYSTEM:WINDOWS")
 
 # ลิงก์ wxWidgets, Boost และ libmodbus
 target_link_libraries(MyWxApp 
@@ -57,6 +62,12 @@ target_link_libraries(MyWxApp
         Matplot++::cimg  
         Matplot++::matplot
         windowsapp
+	    implot::implot
+)
+
+# เพิ่มการกำหนด include directories
+target_include_directories(MyWxApp PRIVATE 
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
 # คัดลอกไฟล์จากไดเรกทอรี media ไปยังโฟลเดอร์ build
