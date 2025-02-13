@@ -2,6 +2,8 @@
 #define MANUAL_CALIBRATE_HPP
 
 #include <wx/wx.h>
+#include <wx/app.h> 
+#include <wx/event.h>
 #include <wx/grid.h>
 #include <wx/stattext.h>
 #include <wx/textctrl.h>
@@ -73,7 +75,7 @@ public:
     void OnReadTimer();
     void OnDisplayTimer();
     //------------------------------------------------------------------------------------------------
-    serial_port InitialSerial(io_service& io, const string& port_name);
+    serial_port InitialSerial(io_service& io, const string& port_name ,unsigned int baudrate);
     modbus_t* InitialModbus(const char* modbus_port);
 	//------------------------------------------------------------------------------------------------
     static const size_t DUMP_THRESHOLD = 500;
@@ -101,9 +103,9 @@ private:
         }
     }
 	//------------------------------------------------------------------------------------------------
-    atomic<float> refFlowValue{ 0.0 };
-    atomic<float> actFlowValue{ 0.0 };
-    atomic<float> errorValue_percentage{ 0.0 };
+    float refFlowValue = 0.0 ;
+    float actFlowValue = 0.0 ;
+    float errorValue_percentage = 0.0  ;
 	//------------------------------------------------------------------------------------------------
     deque<float> setpointData, actData, errorData, refData;
     deque<long> pushTimestamps; // Vector to store push timestamps
@@ -153,7 +155,7 @@ private:
 	//------------------------------------------------------------------------------------------------
     serial_port serialCtx;
     modbus_t* modbusCtx;
-    string BLECtx;
+    serial_port BLECtx;
     uint16_t refFlow[4];
     int rc;
 	//------------------------------------------------------------------------------------------------

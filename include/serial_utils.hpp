@@ -20,8 +20,8 @@ using namespace boost::asio;
 float parseMeaValueStructure(const string& data);
 uint32_t hexToUint32(const std::string& hexStr);
 void send_scpi_command(serial_port& serial, const string& command, string& response , bool expect_response = true);
-float sendAndReceiveBetweenPorts(const string& portSend, unsigned int baudrate =115200 );
-uint32_t sendRequestSerialNumber(const string& portSend, unsigned int baudrate = 115200);
+float sendAndReceiveBetweenPorts(serial_port& serial);
+uint32_t sendRequestSerialNumber(serial_port& serial);
 void set_voltage(serial_port& serial, double voltage);
 void set_current(serial_port& serial, double current);
 

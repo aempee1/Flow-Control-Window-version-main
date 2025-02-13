@@ -3,8 +3,9 @@ using namespace std;
 using namespace boost::asio;
 //----------------------------------------------------------------------------------------------------------------------------------
 static auto initialTime = std::chrono::steady_clock::now();
-io_service io; 
-std::atomic<bool> timerRunning{ false };
+io_service io_serial;
+io_service io_ble;
+atomic<bool> timerRunning{ false };
 static bool startedTimer = false; // ตัวแปรใหม่เพื่อเก็บสถานะการเริ่มนับเวลา
 //----------------------------------------------------------------------------------------------------------------------------------
 string formatTimestamp(long milliseconds) {
@@ -32,7 +33,7 @@ void SetThreadName(const std::string& name) {
 //----------------------------------------------------------------------------------------------------------------------------------
 ManualCalibrationDialog::ManualCalibrationDialog(wxWindow* parent)
     : wxDialog(parent, wxID_ANY, "Manual Calibration", wxDefaultPosition, wxSize(400, 400), wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER),
-    setpoint(0),modbusCtx(nullptr), serialCtx(io),BLECtx("") {
+    setpoint(0),modbusCtx(nullptr), serialCtx(io_serial),BLECtx(io_ble) {
     wxBoxSizer* mainSizer = new wxBoxSizer(wxVERTICAL);
     wxFlexGridSizer* gridSizer = new wxFlexGridSizer(4, 3, 10, 10);
     // Set Flow Row
@@ -93,8 +94,8 @@ ManualCalibrationDialog::ManualCalibrationDialog(wxWindow* parent)
         wxMessageBox("Selected ports are insufficient.", "Error", wxOK | wxICON_ERROR, this);
         return;
     }
-    BLECtx = selectedPorts[0];
-    serialCtx = InitialSerial(io, selectedPorts[2].c_str());
+    BLECtx = InitialSerial(io_ble , selectedPorts[0].c_str() , 115200);
+    serialCtx = InitialSerial(io_serial , selectedPorts[2].c_str() , 9600);
     modbusCtx = InitialModbus(selectedPorts[1].c_str());
     if (!modbusCtx) {
         wxMessageBox("Failed to initialize Modbus.", "Error", wxOK | wxICON_ERROR, this);
@@ -111,12 +112,15 @@ ManualCalibrationDialog::~ManualCalibrationDialog() {
     if (serialCtx.is_open()) {
         serialCtx.close();
     }
+    if (BLECtx.is_open()) {
+        BLECtx.close();
+    }
 }
 //----------------------------------------------------------------------------------------------------------------------------------
-serial_port ManualCalibrationDialog::InitialSerial(io_service& io, const string& port_name)
+serial_port ManualCalibrationDialog::InitialSerial(io_service& io, const string& port_name ,unsigned int baudrate)
 {
     serial_port serial(io, port_name);
-    serial.set_option(serial_port_base::baud_rate(9600));
+    serial.set_option(serial_port_base::baud_rate(baudrate));
     serial.set_option(serial_port_base::character_size(8));
     serial.set_option(serial_port_base::parity(serial_port_base::parity::none));
     serial.set_option(serial_port_base::stop_bits(serial_port_base::stop_bits::one));
@@ -254,6 +258,7 @@ void ManualCalibrationDialog::OnStopButtonClick(wxCommandEvent& event) {
     stopButton->Disable();
     startButton->Enable();
     setFlowInput->SetEditable(true); 
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
 	//----------------------------------------------------------------------------------------------------------------------------------
     // ดึงวันที่ปัจจุบัน
     auto t = std::time(nullptr);
@@ -300,11 +305,9 @@ void ManualCalibrationDialog::OnStopButtonClick(wxCommandEvent& event) {
                 while (std::getline(dumpFile, line)) {
                     std::stringstream ss(line);
                     std::string timestamp, ref, act;
-
                     std::getline(ss, timestamp, ',');
                     std::getline(ss, ref, ',');
                     std::getline(ss, act, ',');
-
                     float refValue = std::stof(ref);
                     float actValue = std::stof(act);
                     float errorValue_percentage = (actValue != 0.0f) ?
@@ -403,23 +406,24 @@ void ManualCalibrationDialog::StopThread() {
 }
 //----------------------------------------------------------------------------------------------------------------------------------
 void ManualCalibrationDialog::readModbusWorker() {
-        std::atomic<float> localRefFlowValue{ 0.0f };
+        float localRefFlowValue = 0.0f ;
         rc = modbus_read_registers(modbusCtx, 6, 2, refFlow);
         if (rc != -1) {
              memcpy(&localRefFlowValue, refFlow, sizeof(localRefFlowValue));
-             localRefFlowValue.store(std::round(localRefFlowValue.load() * 1000.0) / 1000.0);
+             localRefFlowValue = std::round(localRefFlowValue * 1000.0) / 1000.0;
         }
         else {
-             localRefFlowValue.store(0.0f);
+             localRefFlowValue = 0.0f;
         } 
-        localRefFlowValue.store(refFlowValue.load());
-        refFlowBuffer.push({ localRefFlowValue.load()});
+        refFlowBuffer.push({ localRefFlowValue });
+        refFlowValue = localRefFlowValue ;
+        
 }
 void ManualCalibrationDialog::readBluetoothWorker() {
-        atomic<float> localActFlowValue{ 0.0f };
-        localActFlowValue.store(sendAndReceiveBetweenPorts(BLECtx));
-        localActFlowValue.store(actFlowValue.load());
-        actFlowBuffer.push({localActFlowValue.load()});
+        float localActFlowValue = 0.0f ;
+        localActFlowValue = sendAndReceiveBetweenPorts(BLECtx); 
+        actFlowBuffer.push({ localActFlowValue });
+        refFlowValue = localActFlowValue ;        
      /*  boost::this_thread::sleep(boost::posix_time::milliseconds(100));*/  
 }
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -466,29 +470,30 @@ void ManualCalibrationDialog::OnReadTimer() {
     dumpDataToFile();
 }
 void ManualCalibrationDialog::OnDisplayTimer() {
-    if (refFlowValue != 0) {
-        errorValue_percentage = ((refFlowValue - actFlowValue) / refFlowValue) * 100.0f;
-    }
-    else {
-        errorValue_percentage = 0.0f; // ป้องกันหารด้วย 0
-    }
-    refFlowInput->SetValue(wxString::Format("%.1f", refFlowValue.load()));
-    actFlowInput->SetValue(wxString::Format("%.1f", actFlowValue.load()));
-    errorInput->SetValue(wxString::Format("%.1f", errorValue_percentage.load()));
+    this->CallAfter([this]() {
+        if (refFlowValue != 0) {
+            errorValue_percentage = ((refFlowValue - actFlowValue) / refFlowValue) * 100.0f;
+        }
+        else {
+            errorValue_percentage = 0.0f;
+        }
+        refFlowInput->SetValue(wxString::Format("%.1f", refFlowValue));
+        actFlowInput->SetValue(wxString::Format("%.1f", actFlowValue));
+        errorInput->SetValue(wxString::Format("%.1f", errorValue_percentage));
+        });
 }
 //----------------------------------------------------------------------------------------------------------------------------------
 void ManualCalibrationDialog::calculatePIDWorker() {
     // ใช้ atomic สำหรับตัวแปรที่ใช้ร่วมกัน
-    std::atomic<float> localRefFlowValue{0.0f};
-    std::atomic<float> localActFlowValue{0.0f};
-    std::atomic<float> localPIDOutput{0.0f};
+    float localRefFlowValue = 0.0f;
+    float localActFlowValue = 0.0f;
+    float localPIDOutput = 0.0f;
     while (timerRunning) {
-        float localRefFlowValue = refFlowValue.load();
-        float localActFlowValue = actFlowValue.load();
-        float localPIDOutput = calculatePID(setpoint, localRefFlowValue);
+        localRefFlowValue = refFlowValue;
+        localActFlowValue = actFlowValue;
+        localPIDOutput = calculatePID(setpoint, localRefFlowValue);
         localPIDOutput = std::clamp<float>(localPIDOutput, 0.3f, 1.5f);
         pidOutput = localPIDOutput;
-        // เพิ่ม timeout สำหรับการส่งค่า
         set_current(serialCtx, localPIDOutput);
         /*std::this_thread::sleep_for(std::chrono::milliseconds(100));*/
     }
