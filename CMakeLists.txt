@@ -27,7 +27,16 @@ find_package(implot CONFIG REQUIRED)
 #-------------------------------------------------------------------------------------------------
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreadedDLL")
 #-------------------------------------------------------------------------------------------------
-add_executable(MyWxApp WIN32 main.cpp src/modbus_utils.cpp src/serial_utils.cpp src/comport_setting.cpp src/mainwindow_properties.cpp src/manual_calibrate.cpp src/mathplot.cpp)
+add_executable(MyWxApp WIN32 
+                                    main.cpp 
+                                    src/modbus_utils.cpp 
+                                    src/serial_utils.cpp 
+                                    src/comport_setting.cpp 
+                                    src/mainwindow_properties.cpp 
+                                    src/manual_calibrate.cpp 
+                                    src/mathplot.cpp
+                                    src/automate_calibrate.cpp
+				                    src/file_settings.cpp)
 #-------------------------------------------------------------------------------------------------
 set_target_properties(MyWxApp PROPERTIES LINK_FLAGS "/SUBSYSTEM:WINDOWS")
 #-------------------------------------------------------------------------------------------------

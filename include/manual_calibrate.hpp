@@ -48,7 +48,7 @@ using namespace std;
 using namespace boost::asio;
 
 std::string formatTimestamp(long milliseconds);
-
+void SetThreadName(const std::string& name);
 
 //----------------------------------------------------------------------------------------------------------------------------------
 class ManualCalibrationDialog : public wxDialog {

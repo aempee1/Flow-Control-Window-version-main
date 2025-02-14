@@ -8,6 +8,8 @@
 #include <wx/sizer.h>
 #include "manual_calibrate.hpp"
 #include "comport_setting.hpp"
+#include "file_settings.hpp"
+#include "automate_calibrate.hpp"
 
 
 // สร้างคลาสหลักสำหรับหน้าต่าง
@@ -20,7 +22,8 @@ private:
     void OnAboutSoftware(wxCommandEvent& event); // ฟังก์ชันสำหรับจัดการคลิกเมนู About
     void OnComportSettings(wxCommandEvent& event); // ฟังก์ชันสำหรับจัดการคลิกเมนู Comport Settings
     void OnManualFlowsystem(wxCommandEvent& event); //
-	
+    void OnFileSetting(wxCommandEvent& event);
+    void OnAutoCalibrate(wxCommandEvent& event);
     wxStaticBitmap* staticBitmap; // สำหรับแสดงรูป
     wxImage image;               // รูปภาพต้นฉบับ
     void OnResize(wxSizeEvent& event); // ฟังก์ชันจัดการเมื่อขนาดหน้าต่างเปลี่ยนแปลง
