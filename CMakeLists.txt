@@ -35,7 +35,7 @@ add_executable(MyWxApp WIN32
                                     src/mainwindow_properties.cpp 
                                     src/manual_calibrate.cpp 
                                     src/mathplot.cpp
-                                    src/automate_calibrate.cpp
+                                    src/automate_flowtest.cpp
 				                    src/file_settings.cpp)
 #-------------------------------------------------------------------------------------------------
 set_target_properties(MyWxApp PROPERTIES LINK_FLAGS "/SUBSYSTEM:WINDOWS")

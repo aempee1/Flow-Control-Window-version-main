@@ -3,8 +3,6 @@ using namespace std;
 using namespace boost::asio;
 //----------------------------------------------------------------------------------------------------------------------------------
 static auto initialTime = std::chrono::steady_clock::now();
-io_service io_serial;
-io_service io_ble;
 atomic<bool> timerRunning{ false };
 static bool startedTimer = false; // ตัวแปรใหม่เพื่อเก็บสถานะการเริ่มนับเวลา
 //----------------------------------------------------------------------------------------------------------------------------------

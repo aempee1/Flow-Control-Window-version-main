@@ -1,34 +1,27 @@
 #include "mainwindow_properties.hpp"
 
-
-
 MyFrame::MyFrame(const wxString &title, const wxPoint &pos, const wxSize &size)
     : wxFrame(NULL, wxID_ANY, title, pos, size)
 {
     SetupMainMenu(); // เรียกใช้ฟังก์ชันสร้างเมนู
     // เพิ่ม Handler สำหรับไฟล์ PNG
     wxImage::AddHandler(new wxPNGHandler);
-
     // โหลดรูปภาพต้นฉบับ
     image.LoadFile(wxT("media/SutoLogo.png"), wxBITMAP_TYPE_PNG);
-
     // ตรวจสอบว่ารูปภาพโหลดสำเร็จ
     if (!image.IsOk())
     {
         wxMessageBox("Failed to load image!", "Error", wxOK | wxICON_ERROR);
         return;
     }
-
     // สร้าง StaticBitmap เพื่อแสดงรูป (ใช้ขนาดเริ่มต้น)
     wxBitmap bitmap(image);
     staticBitmap = new wxStaticBitmap(this, wxID_ANY, bitmap);
-
     // จัดการเหตุการณ์เปลี่ยนขนาดหน้าต่าง
     this->SetBackgroundColour(*wxWHITE);
     this->Bind(wxEVT_SIZE, &MyFrame::OnResize, this);
     this->SetMinSize(this->FromDIP(wxSize(200, 200)));
     this->SetSize(this->FromDIP(wxSize(400, 300)));
-
     this->Center();
 }
 
@@ -57,9 +50,8 @@ void MyFrame::OnFileSetting(wxCommandEvent& WXUNUSED(event)) {
     FileSettingDialog dialog(this);
     dialog.ShowModal();//
 }
-
-void MyFrame::OnAutoCalibrate(wxCommandEvent& WXUNUSED(event)) {
-    AutomateCalibrateDialog dialog(this);
+void MyFrame::OnAutoFlow(wxCommandEvent& WXUNUSED(event)) {
+    AutomateCheckpointDialog dialog(this);
     dialog.ShowModal();
 }
 void MyFrame::SetupMainMenu() {
@@ -85,7 +77,6 @@ void MyFrame::SetupMainMenu() {
     menuBar->Append(R_D_testMenu, "&RnD Test");
     menuBar->Append(helpMenu, "&Help");
     menuBar->Append(aboutMenu, "&About");
-
     // ตั้งค่า MenuBar ให้กับหน้าต่าง
     SetMenuBar(menuBar);
 }
@@ -150,5 +141,5 @@ wxBEGIN_EVENT_TABLE(MyFrame, wxFrame)
     EVT_MENU(1002, MyFrame::OnComportSettings)
     EVT_MENU(1003, MyFrame::OnManualFlowsystem) 
     EVT_MENU(1004, MyFrame::OnFileSetting)
-    EVT_MENU(1005, MyFrame::OnAutoCalibrate)
+    EVT_MENU(1005, MyFrame::OnAutoFlow)
 wxEND_EVENT_TABLE()

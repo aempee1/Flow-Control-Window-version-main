@@ -82,7 +82,8 @@ public:
     std::string dumpFilePath;
     size_t totalEntriesWritten = 0;
     void dumpDataToFile();
-
+    io_service io_serial;
+    io_service io_ble;
 
 private:
     wxDECLARE_EVENT_TABLE();
@@ -158,6 +159,7 @@ private:
     serial_port BLECtx;
     uint16_t refFlow[4];
     int rc;
+    
 	//------------------------------------------------------------------------------------------------
     uint32_t SerialNumber;
 	//------------------------------------------------------------------------------------------------

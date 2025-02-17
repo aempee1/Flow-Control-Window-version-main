@@ -9,9 +9,7 @@
 #include "manual_calibrate.hpp"
 #include "comport_setting.hpp"
 #include "file_settings.hpp"
-#include "automate_calibrate.hpp"
-
-
+#include "automate_flowtest.hpp"
 // สร้างคลาสหลักสำหรับหน้าต่าง
 class MyFrame : public wxFrame {
 public:
@@ -23,7 +21,7 @@ private:
     void OnComportSettings(wxCommandEvent& event); // ฟังก์ชันสำหรับจัดการคลิกเมนู Comport Settings
     void OnManualFlowsystem(wxCommandEvent& event); //
     void OnFileSetting(wxCommandEvent& event);
-    void OnAutoCalibrate(wxCommandEvent& event);
+    void OnAutoFlow(wxCommandEvent& event);
     wxStaticBitmap* staticBitmap; // สำหรับแสดงรูป
     wxImage image;               // รูปภาพต้นฉบับ
     void OnResize(wxSizeEvent& event); // ฟังก์ชันจัดการเมื่อขนาดหน้าต่างเปลี่ยนแปลง

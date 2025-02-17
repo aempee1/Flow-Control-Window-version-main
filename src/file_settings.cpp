@@ -52,4 +52,6 @@ void FileSettingDialog::OnSave(wxCommandEvent& event) {
         }
         file.close();
     }
+    // »Ô´ dialog
+    EndModal(wxID_OK);
 }
