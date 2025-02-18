@@ -1,10 +1,11 @@
 ﻿#include "automate_flowtest.hpp"
+vector<int> setpoint = {};
 AutomateCheckpointDialog::AutomateCheckpointDialog(wxWindow* parent) 
-    : wxDialog(parent, wxID_ANY, "Auto Mate Calibrate Test", wxDefaultPosition, wxSize(700, 500), wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER), setpoint(0), modbusCtx(nullptr), serialCtx(io_serial), BLECtx(io_ble) {
+    : wxDialog(parent, wxID_ANY, "Auto Mate Calibrate Test", wxDefaultPosition, wxSize(700, 500), wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER), modbusCtx(nullptr), serialCtx(io_serial), BLECtx(io_ble) {
     wxPanel* panel = new wxPanel(this);
     wxBoxSizer* vbox = new wxBoxSizer(wxVERTICAL);
     // กำหนดค่า grid
-    grid = new wxGridSizer(11, 5, 5, 5);
+    grid = new wxGridSizer(11, 4, 5, 5);
     // Header
     wxStaticText* title = new wxStaticText(panel, wxID_ANY, "Auto Flow Checkpoint", wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER);
     title->SetFont(wxFont(14, wxFONTFAMILY_SWISS, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_BOLD));
@@ -20,32 +21,23 @@ AutomateCheckpointDialog::AutomateCheckpointDialog(wxWindow* parent)
     grid->Add(new wxStaticText(panel, wxID_ANY, "Flow l/m", wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER), 0, wxEXPAND);
     grid->Add(new wxStaticText(panel, wxID_ANY, "Act Flow", wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER), 0, wxEXPAND);
     grid->Add(new wxStaticText(panel, wxID_ANY, "Ref Flow", wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER), 0, wxEXPAND);
-    grid->Add(new wxStaticText(panel, wxID_ANY, "Status", wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER), 0, wxEXPAND);
     vbox->Add(grid, 1, wxEXPAND | wxALL, 10);
     // ปุ่ม
     wxBoxSizer* hbox = new wxBoxSizer(wxHORIZONTAL);
-
-    wxButton* loadFileBtn = new wxButton(panel, wxID_ANY, "Load File");
-    loadFileBtn->Bind(wxEVT_BUTTON, &AutomateCheckpointDialog::OnLoadFile, this);
-
+    wxButton* loadFileBtn = new wxButton(panel, 1021, "Load File");
     wxButton* exportBtn = new wxButton(panel, wxID_ANY, "Export Log");
-    wxButton* startBtn = new wxButton(panel, wxID_ANY, "Start");
+    wxButton* startBtn = new wxButton(panel, 1020, "Start");
     wxButton* stopBtn = new wxButton(panel, wxID_ANY, "Stop");
     wxButton* cancelBtn = new wxButton(panel, wxID_CANCEL, "Cancel");
-
     // ปุ่ม Load File และ Export Log อยู่ใน row เดียวกัน
     hbox->Add(loadFileBtn, 0, wxRIGHT, 10);
     hbox->Add(exportBtn, 0, wxRIGHT, 10);
-
     // ปุ่ม Start และ Stop อยู่มุมล่างซ้ายของ UI
     hbox->Add(startBtn, 0, wxRIGHT, 10);
     hbox->Add(stopBtn, 0, wxRIGHT, 10);
-
     hbox->AddStretchSpacer(); // ให้ปุ่ม Cancel ไปอยู่ทางขวา
     hbox->Add(cancelBtn, 0);
-
     vbox->Add(hbox, 0, wxEXPAND | wxALL, 10);
-
     panel->SetSizer(vbox);
     // Load ports from file
     vector<string> selectedPorts;
@@ -148,69 +140,78 @@ bool AutomateCheckpointDialog::CheckAndLoadPorts(const string& fileName, vector<
     return true;
 }
 //----------------------------------------------------------------------------------------------------------------------
-void AutomateCheckpointDialog::LoadDataFromFile(const std::string& filePath) {
-    std::ifstream file(filePath);
+void AutomateCheckpointDialog::LoadDataFromFile(const string& filePath) {
+    ifstream file(filePath);
     if (!file.is_open()) {
         wxMessageBox("Failed to open file", "Error", wxOK | wxICON_ERROR, this);
         return;
     }
 
-    std::string line;
-    std::string sensor;
-    std::string pipeDiameter;
-    std::vector<std::pair<int, int>> checkPoints;
+    string line;
+    string sensor;
+    string pipeDiameter;
+    setpoint.clear();
+    actFlowCells.clear();
+    refFlowCells.clear();
 
-    while (std::getline(file, line)) {
+    vector<pair<int, int>> checkPoints;
+    while (getline(file, line)) {
+        // อ่านค่า Sensor
         if (line.find("Sensor:") == 0) {
             sensor = line.substr(8);
+            sensor.erase(sensor.begin(), find_if(sensor.begin(), sensor.end(), [](unsigned char ch) { return !isspace(ch); })); // Trim leading spaces
         }
+        // อ่านค่า Pipe Diameter
         else if (line.find("Pipe Diameter:") == 0) {
             pipeDiameter = line.substr(14);
+            pipeDiameter.erase(pipeDiameter.begin(), find_if(pipeDiameter.begin(), pipeDiameter.end(), [](unsigned char ch) { return !isspace(ch); }));
         }
+        // อ่าน Check Points
         else if (isdigit(line[0])) {
-            std::istringstream iss(line);
+            istringstream iss(line);
             int point, value;
             char comma;
             if (iss >> point >> comma >> value) {
                 checkPoints.emplace_back(point, value);
+                setpoint.push_back(value);
             }
         }
     }
 
     file.close();
 
-    // อัปเดต UI
+    // อัปเดตค่า Sensor และ Pipe Diameter ใน UI
     sensorText->SetLabel("Sensor: " + sensor);
     pipeText->SetLabel("Pipe Diameter: " + pipeDiameter);
 
-    // ตรวจสอบว่า grid มีอยู่แล้วหรือไม่
     if (!grid || checkPoints.empty()) return;
 
-    // ? 1. ลบ widget เก่าออกจาก `wxGridSizer`
     grid->Clear(true);
 
-    // ? 2. ใส่ Header กลับเข้าไปใหม่
-    grid->Add(new wxStaticText(grid->GetContainingWindow(), wxID_ANY, "Point", wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER), 0, wxEXPAND);
-    grid->Add(new wxStaticText(grid->GetContainingWindow(), wxID_ANY, "Flow l/m", wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER), 0, wxEXPAND);
-    grid->Add(new wxStaticText(grid->GetContainingWindow(), wxID_ANY, "Act Flow", wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER), 0, wxEXPAND);
-    grid->Add(new wxStaticText(grid->GetContainingWindow(), wxID_ANY, "Ref Flow", wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER), 0, wxEXPAND);
-    grid->Add(new wxStaticText(grid->GetContainingWindow(), wxID_ANY, "Status", wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER), 0, wxEXPAND);
+    // เพิ่ม Header
+    grid->Add(new wxStaticText(grid->GetContainingWindow(), wxID_ANY, "Point", wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER), 0, wxEXPAND | wxALIGN_CENTER_HORIZONTAL | wxALIGN_CENTER_VERTICAL);
+    grid->Add(new wxStaticText(grid->GetContainingWindow(), wxID_ANY, "Flow l/m", wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER), 0, wxEXPAND | wxALIGN_CENTER_HORIZONTAL | wxALIGN_CENTER_VERTICAL);
+    grid->Add(new wxStaticText(grid->GetContainingWindow(), wxID_ANY, "Act Flow", wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER), 0, wxEXPAND | wxALIGN_CENTER_HORIZONTAL | wxALIGN_CENTER_VERTICAL);
+    grid->Add(new wxStaticText(grid->GetContainingWindow(), wxID_ANY, "Ref Flow", wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER), 0, wxEXPAND | wxALIGN_CENTER_HORIZONTAL | wxALIGN_CENTER_VERTICAL);
 
-    // ? 3. เติมข้อมูล Point และ Flow ลงไป
     for (const auto& [point, flow] : checkPoints) {
-        wxStaticText* pointText = new wxStaticText(grid->GetContainingWindow(), wxID_ANY, std::to_string(point), wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER);
-        wxStaticText* flowText = new wxStaticText(grid->GetContainingWindow(), wxID_ANY, std::to_string(flow), wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER);
+        grid->Add(new wxStaticText(grid->GetContainingWindow(), wxID_ANY, to_string(point), wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER), 0, wxEXPAND | wxALIGN_CENTER_HORIZONTAL | wxALIGN_CENTER_VERTICAL);
+        grid->Add(new wxStaticText(grid->GetContainingWindow(), wxID_ANY, to_string(flow), wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER), 0, wxEXPAND | wxALIGN_CENTER_HORIZONTAL | wxALIGN_CENTER_VERTICAL);
 
-        grid->Add(pointText, 0, wxEXPAND);
-        grid->Add(flowText, 0, wxEXPAND);
-        grid->Add(new wxStaticText(grid->GetContainingWindow(), wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER), 0, wxEXPAND);
-        grid->Add(new wxStaticText(grid->GetContainingWindow(), wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER), 0, wxEXPAND);
-        grid->Add(new wxStaticText(grid->GetContainingWindow(), wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER), 0, wxEXPAND);
+        wxStaticText* actFlowText = new wxStaticText(grid->GetContainingWindow(), wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER);
+        wxStaticText* refFlowText = new wxStaticText(grid->GetContainingWindow(), wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER);
+
+        actFlowCells.push_back(actFlowText);
+        refFlowCells.push_back(refFlowText);
+
+        grid->Add(actFlowText, 0, wxEXPAND | wxALIGN_CENTER_HORIZONTAL | wxALIGN_CENTER_VERTICAL);
+        grid->Add(refFlowText, 0, wxEXPAND | wxALIGN_CENTER_HORIZONTAL | wxALIGN_CENTER_VERTICAL);
     }
-    // ? 4. รีเฟรช UI ให้แสดงค่าที่เพิ่มเข้าไป
+
     grid->Layout();
     grid->GetContainingWindow()->Layout();
 }
+
 void AutomateCheckpointDialog::OnLoadFile(wxCommandEvent& event) {
     wxFileDialog openFileDialog(this, "Open TXT file", "", "", "Text files (*.txt)|*.txt", wxFD_OPEN | wxFD_FILE_MUST_EXIST);
     if (openFileDialog.ShowModal() == wxID_CANCEL) {
@@ -219,3 +220,30 @@ void AutomateCheckpointDialog::OnLoadFile(wxCommandEvent& event) {
     LoadDataFromFile(openFileDialog.GetPath().ToStdString());
 }
 //----------------------------------------------------------------------------------------------------------------------
+void AutomateCheckpointDialog::OnUpdateFlowTimer(wxTimerEvent& event) {
+    if (currentRowIndex >= setpoint.size()) {
+        updateTimer.Stop();
+        return;
+    }
+
+    if (currentRowIndex < actFlowCells.size()) {
+        actFlowCells[currentRowIndex]->SetLabel(to_string(setpoint[currentRowIndex]));
+        refFlowCells[currentRowIndex]->SetLabel(to_string(setpoint[currentRowIndex]));
+    }
+
+    grid->Layout();
+    grid->GetContainingWindow()->Layout();
+    currentRowIndex++;
+}
+
+void AutomateCheckpointDialog::StartUpdatingFlowValues(wxCommandEvent& event) {
+    currentRowIndex = 0;
+    updateTimer.SetOwner(this,1022);
+    updateTimer.Start(1000);  // เรียก event ทุก 1 วินาที
+}
+
+BEGIN_EVENT_TABLE(AutomateCheckpointDialog, wxDialog)
+    EVT_BUTTON(1020, AutomateCheckpointDialog::StartUpdatingFlowValues)
+    EVT_BUTTON(1021, AutomateCheckpointDialog::OnLoadFile)
+    EVT_TIMER(1022, AutomateCheckpointDialog::OnUpdateFlowTimer)
+END_EVENT_TABLE()

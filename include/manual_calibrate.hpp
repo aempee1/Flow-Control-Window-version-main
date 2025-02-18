@@ -47,8 +47,8 @@
 using namespace std;
 using namespace boost::asio;
 
-std::string formatTimestamp(long milliseconds);
-void SetThreadName(const std::string& name);
+string formatTimestamp(long milliseconds);
+void SetThreadName(const string& name);
 
 //----------------------------------------------------------------------------------------------------------------------------------
 class ManualCalibrationDialog : public wxDialog {
@@ -79,7 +79,7 @@ public:
     modbus_t* InitialModbus(const char* modbus_port);
 	//------------------------------------------------------------------------------------------------
     static const size_t DUMP_THRESHOLD = 500;
-    std::string dumpFilePath;
+    string dumpFilePath;
     size_t totalEntriesWritten = 0;
     void dumpDataToFile();
     io_service io_serial;
@@ -136,7 +136,7 @@ private:
     double pidOutput = 0.3;
     int setpoint;
 	//------------------------------------------------------------------------------------------------
-    vector<std::string> timestampData; // เก็บข้อมูล Timestamp
+    vector<string> timestampData; // เก็บข้อมูล Timestamp
     vector<long> elapsedTimestamps; // เวลาที่ผ่านไปจากการอ่านครั้งแรก (ms)
     vector<long> pushIntervals;    // เก็บระยะห่างระหว่างการ Push (หน่วย: มิลลิวินาที)
 	//------------------------------------------------------------------------------------------------

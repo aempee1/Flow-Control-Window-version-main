@@ -16,7 +16,6 @@
 #include <sys/stat.h>
 #include <atomic>
 #include <fstream>
-#include <sstream>
 #include <string>
 #include <tuple>
 #include <stdexcept>
@@ -24,6 +23,15 @@
 #include <numeric>
 #include <iomanip>
 #include <chrono>
+#include <ctime>
+#include <thread>
+#include <mutex>
+#include <algorithm> 
+#include <queue>
+#include <optional>
+#include <condition_variable>
+#include <cmath>
+#include <stop_token>
 
 using namespace std;
 using namespace boost::asio;
@@ -33,6 +41,9 @@ public:
     AutomateCheckpointDialog(wxWindow* parent);
     ~AutomateCheckpointDialog();
     double calculatePID(double setpointValue, double currentValue);
+    //--------------------------------------------------------------------------------
+    vector<wxStaticText*> actFlowCells;
+    vector<wxStaticText*> refFlowCells;
     //--------------------------------------------------------------------------------
     serial_port InitialSerial(io_service& io, const string& port_name, unsigned int baudrate);
     modbus_t* InitialModbus(const char* modbus_port);
@@ -51,9 +62,15 @@ public:
     double pidOutput = 0.3;
     double previousError = 0.0;
     //------------------------------------------------------------------------------------
-    int setpoint;
+    void OnUpdateFlowTimer(wxTimerEvent& event);
+    void StartUpdatingFlowValues(wxCommandEvent& event);
+    wxTimer updateTimer;
+    int currentRowIndex = 0;
+    //------------------------------------------------------------------------------------
+    wxDECLARE_EVENT_TABLE();
     //------------------------------------------------------------------------------------
 private:
+    //-----------------------------------------------------------------------------------
     serial_port serialCtx;
     modbus_t* modbusCtx;
     serial_port BLECtx;
