@@ -2,12 +2,12 @@
 vector<int> setpoint = {};
 AutomateCheckpointDialog::AutomateCheckpointDialog(wxWindow* parent) 
     : wxDialog(parent, wxID_ANY, "Auto Mate Calibrate Test", wxDefaultPosition, wxSize(700, 500), wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER), modbusCtx(nullptr), serialCtx(io_serial), BLECtx(io_ble) {
-    wxPanel* panel = new wxPanel(this);
-    wxBoxSizer* vbox = new wxBoxSizer(wxVERTICAL);
+    panel = new wxPanel(this);
+    vbox = new wxBoxSizer(wxVERTICAL);
     // กำหนดค่า grid
-    grid = new wxGridSizer(11, 4, 5, 5);
+    grid = new wxGridSizer(11, 5, 5, 5);
     // Header
-    wxStaticText* title = new wxStaticText(panel, wxID_ANY, "Auto Flow Checkpoint", wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER);
+    title = new wxStaticText(panel, wxID_ANY, "Auto Flow Checkpoint", wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER);
     title->SetFont(wxFont(14, wxFONTFAMILY_SWISS, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_BOLD));
     vbox->Add(title, 0, wxALL | wxALIGN_CENTER, 10);
     sensorText = new wxStaticText(panel, wxID_ANY, "Sensor: ");
@@ -21,14 +21,15 @@ AutomateCheckpointDialog::AutomateCheckpointDialog(wxWindow* parent)
     grid->Add(new wxStaticText(panel, wxID_ANY, "Flow l/m", wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER), 0, wxEXPAND);
     grid->Add(new wxStaticText(panel, wxID_ANY, "Act Flow", wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER), 0, wxEXPAND);
     grid->Add(new wxStaticText(panel, wxID_ANY, "Ref Flow", wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER), 0, wxEXPAND);
+    grid->Add(new wxStaticText(panel, wxID_ANY, "Error %", wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER), 0, wxEXPAND);
     vbox->Add(grid, 1, wxEXPAND | wxALL, 10);
     // ปุ่ม
-    wxBoxSizer* hbox = new wxBoxSizer(wxHORIZONTAL);
-    wxButton* loadFileBtn = new wxButton(panel, 1021, "Load File");
-    wxButton* exportBtn = new wxButton(panel, wxID_ANY, "Export Log");
-    wxButton* startBtn = new wxButton(panel, 1020, "Start");
-    wxButton* stopBtn = new wxButton(panel, wxID_ANY, "Stop");
-    wxButton* cancelBtn = new wxButton(panel, wxID_CANCEL, "Cancel");
+    hbox = new wxBoxSizer(wxHORIZONTAL);
+    loadFileBtn = new wxButton(panel, 1021, "Load File");
+    exportBtn = new wxButton(panel, wxID_ANY, "Export Log");
+    startBtn = new wxButton(panel, 1020, "Start");
+    stopBtn = new wxButton(panel, wxID_ANY, "Stop");
+    cancelBtn = new wxButton(panel, wxID_CANCEL, "Cancel");
     // ปุ่ม Load File และ Export Log อยู่ใน row เดียวกัน
     hbox->Add(loadFileBtn, 0, wxRIGHT, 10);
     hbox->Add(exportBtn, 0, wxRIGHT, 10);
@@ -153,6 +154,7 @@ void AutomateCheckpointDialog::LoadDataFromFile(const string& filePath) {
     setpoint.clear();
     actFlowCells.clear();
     refFlowCells.clear();
+    errorCells.clear();
 
     vector<pair<int, int>> checkPoints;
     while (getline(file, line)) {
@@ -193,25 +195,27 @@ void AutomateCheckpointDialog::LoadDataFromFile(const string& filePath) {
     grid->Add(new wxStaticText(grid->GetContainingWindow(), wxID_ANY, "Flow l/m", wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER), 0, wxEXPAND | wxALIGN_CENTER_HORIZONTAL | wxALIGN_CENTER_VERTICAL);
     grid->Add(new wxStaticText(grid->GetContainingWindow(), wxID_ANY, "Act Flow", wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER), 0, wxEXPAND | wxALIGN_CENTER_HORIZONTAL | wxALIGN_CENTER_VERTICAL);
     grid->Add(new wxStaticText(grid->GetContainingWindow(), wxID_ANY, "Ref Flow", wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER), 0, wxEXPAND | wxALIGN_CENTER_HORIZONTAL | wxALIGN_CENTER_VERTICAL);
-
+    grid->Add(new wxStaticText(grid->GetContainingWindow(), wxID_ANY, "Error (%)", wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER), 0, wxEXPAND);
     for (const auto& [point, flow] : checkPoints) {
         grid->Add(new wxStaticText(grid->GetContainingWindow(), wxID_ANY, to_string(point), wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER), 0, wxEXPAND | wxALIGN_CENTER_HORIZONTAL | wxALIGN_CENTER_VERTICAL);
         grid->Add(new wxStaticText(grid->GetContainingWindow(), wxID_ANY, to_string(flow), wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER), 0, wxEXPAND | wxALIGN_CENTER_HORIZONTAL | wxALIGN_CENTER_VERTICAL);
 
         wxStaticText* actFlowText = new wxStaticText(grid->GetContainingWindow(), wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER);
         wxStaticText* refFlowText = new wxStaticText(grid->GetContainingWindow(), wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER);
+        wxStaticText* errorText = new wxStaticText(grid->GetContainingWindow(), wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER);
 
         actFlowCells.push_back(actFlowText);
         refFlowCells.push_back(refFlowText);
+        errorCells.push_back(errorText);
 
         grid->Add(actFlowText, 0, wxEXPAND | wxALIGN_CENTER_HORIZONTAL | wxALIGN_CENTER_VERTICAL);
         grid->Add(refFlowText, 0, wxEXPAND | wxALIGN_CENTER_HORIZONTAL | wxALIGN_CENTER_VERTICAL);
+        grid->Add(errorText, 0, wxEXPAND | wxALIGN_CENTER_HORIZONTAL | wxALIGN_CENTER_VERTICAL);
     }
 
     grid->Layout();
     grid->GetContainingWindow()->Layout();
 }
-
 void AutomateCheckpointDialog::OnLoadFile(wxCommandEvent& event) {
     wxFileDialog openFileDialog(this, "Open TXT file", "", "", "Text files (*.txt)|*.txt", wxFD_OPEN | wxFD_FILE_MUST_EXIST);
     if (openFileDialog.ShowModal() == wxID_CANCEL) {
