@@ -14,18 +14,18 @@ string formatTimestamp(long milliseconds) {
     long seconds = milliseconds / 1000.0;
     long millis = milliseconds % 1000;
 
-    std::ostringstream oss;
+    ostringstream oss;
     oss /*<< std::setw(2) << std::setfill('0') << hours << ":"
         << std::setw(2) << std::setfill('0') << minutes << ":"*/
-        << std::setw(2) << std::setfill('0') << seconds << "."
-        << std::setw(3) << std::setfill('0') << millis;
+        << setw(2) << setfill('0') << seconds << "."
+        << setw(3) << setfill('0') << millis;
     return oss.str();
 }
-#include <Windows.h>
-void SetThreadName(const std::string& name) {
-    HRESULT hr = SetThreadDescription(GetCurrentThread(), std::wstring(name.begin(), name.end()).c_str());
+
+void SetThreadName(const string& name) {
+    HRESULT hr = SetThreadDescription(GetCurrentThread(), wstring(name.begin(), name.end()).c_str());
     if (FAILED(hr)) {
-        std::cerr << "Failed to set thread name: " << name << std::endl;
+        cerr << "Failed to set thread name: " << name << endl;
     }
 }
 //----------------------------------------------------------------------------------------------------------------------------------
@@ -188,10 +188,10 @@ double ManualCalibrationDialog::calculatePID(double setpointValue, double curren
 //----------------------------------------------------------------------------------------------------------------------------------
 void ManualCalibrationDialog::OnDoneButtonClick(wxCommandEvent& event) {
     // ฟังก์ชันสำหรับรอ thread ด้วย timeout
-    auto joinThreadWithTimeout = [](std::thread& t, int timeout_ms) {
+    auto joinThreadWithTimeout = [](thread& t, int timeout_ms) {
         if (t.joinable()) {
-            std::future<void> future = std::async(std::launch::async, &std::thread::join, &t);
-            if (future.wait_for(std::chrono::milliseconds(timeout_ms)) == std::future_status::timeout) {
+            future<void> future = async(launch::async, &thread::join, &t);
+            if (future.wait_for(std::chrono::milliseconds(timeout_ms)) == future_status::timeout) {
                 // จัดการกรณี thread ค้าง
                 wxMessageBox("Thread timeout occurred", "Warning", wxOK | wxICON_WARNING);
                 return false;
@@ -256,21 +256,21 @@ void ManualCalibrationDialog::OnStopButtonClick(wxCommandEvent& event) {
     stopButton->Disable();
     startButton->Enable();
     setFlowInput->SetEditable(true); 
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    this_thread::sleep_for(std::chrono::milliseconds(200));
 	//----------------------------------------------------------------------------------------------------------------------------------
     // ดึงวันที่ปัจจุบัน
-    auto t = std::time(nullptr);
-    auto tm = *std::localtime(&t);
-    std::ostringstream oss;
-    oss << std::put_time(&tm, "%Y%m%d");  // yyyyMMdd
-    std::string dateStr = oss.str();
-    std::ostringstream fileNameStream;
+    auto t = time(nullptr);
+    auto tm = *localtime(&t);
+    ostringstream oss;
+    oss << put_time(&tm, "%Y%m%d");  // yyyyMMdd
+    string dateStr = oss.str();
+    ostringstream fileNameStream;
     SerialNumber = sendRequestSerialNumber(BLECtx);
     if (SerialNumber == 0) {
         wxMessageBox("Failed to get Serial Number.", "Error", wxOK | wxICON_ERROR, this);
         return;
     }
-    fileNameStream << "log_SN" << std::setfill('0') << std::setw(8) << SerialNumber << "_" << dateStr << ".csv";
+    fileNameStream << "log_SN" << setfill('0') << setw(8) << SerialNumber << "_" << dateStr << ".csv";
     string file_name = fileNameStream.str();
 	//----------------------------------------------------------------------------------------------------------------------------------
     wxMessageDialog confirmDialog(this,
@@ -288,7 +288,7 @@ void ManualCalibrationDialog::OnStopButtonClick(wxCommandEvent& event) {
             return;
         }
         wxString filePath = saveFileDialog.GetPath();
-        std::ofstream outFile(filePath.ToStdString());
+        ofstream outFile(filePath.ToStdString());
         if (!outFile.is_open()) {
             wxMessageBox("Unable to open file for writing.", "Error", wxOK | wxICON_ERROR, this);
             return;
@@ -297,21 +297,21 @@ void ManualCalibrationDialog::OnStopButtonClick(wxCommandEvent& event) {
         outFile << "Time (s),Reference Flow (l/min),Active Flow (l/min),Error (%)\n";
         // ถ้ามีไฟล์ dump ให้อ่านข้อมูลจากไฟล์ dump ก่อน
         if (!dumpFilePath.empty()) {
-            std::ifstream dumpFile(dumpFilePath);
+            ifstream dumpFile(dumpFilePath);
             if (dumpFile.is_open()) {
-                std::string line;
+                string line;
                 while (std::getline(dumpFile, line)) {
-                    std::stringstream ss(line);
-                    std::string timestamp, ref, act;
-                    std::getline(ss, timestamp, ',');
-                    std::getline(ss, ref, ',');
-                    std::getline(ss, act, ',');
-                    float refValue = std::stof(ref);
-                    float actValue = std::stof(act);
+                    stringstream ss(line);
+                    string timestamp, ref, act;
+                    getline(ss, timestamp, ',');
+                    getline(ss, ref, ',');
+                    getline(ss, act, ',');
+                    float refValue = stof(ref);
+                    float actValue = stof(act);
                     float errorValue_percentage = (actValue != 0.0f) ?
                         ((refValue - actValue) / refValue) * 100.0f : 0.0f;
 
-                    outFile << formatTimestamp(std::stoll(timestamp)) << ","
+                    outFile << formatTimestamp(stoll(timestamp)) << ","
                         << ref << ","
                         << act << ","
                         << abs(errorValue_percentage) << "\n";
@@ -332,7 +332,7 @@ void ManualCalibrationDialog::OnStopButtonClick(wxCommandEvent& event) {
         outFile.close();
         // ลบไฟล์ dump หลังจากเขียนเสร็จ
         if (!dumpFilePath.empty()) {
-            std::remove(dumpFilePath.c_str());
+            remove(dumpFilePath.c_str());
             dumpFilePath.clear();
         }
         pushTimestamps.clear();
@@ -347,39 +347,39 @@ void ManualCalibrationDialog::OnStopButtonClick(wxCommandEvent& event) {
 }
 //----------------------------------------------------------------------------------------------------------------------------------
 void ManualCalibrationDialog::StartThread() {
-    modbusThread = std::thread([this]() {
+    modbusThread = thread([this]() {
         SetThreadName("modbus thread");
         while (timerRunning) {
             readModbusWorker();
-            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            this_thread::sleep_for(std::chrono::milliseconds(200));
         }
         });
-    bluetoothThread = std::thread([this]() {
+    bluetoothThread = thread([this]() {
         SetThreadName("BLE thread");
         while (timerRunning) {
             readBluetoothWorker();
-            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            this_thread::sleep_for(std::chrono::milliseconds(200));
         }
         });
-    pidCalculationThread = std::thread([this]() {
+    pidCalculationThread = thread([this]() {
         SetThreadName("PID thread");
         while (timerRunning) {
             calculatePIDWorker();
-            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            this_thread::sleep_for(std::chrono::milliseconds(200));
         }
         });
-    readTimerThread = std::thread([this]() {
+    readTimerThread = thread([this]() {
         SetThreadName("Read thread");
         while (timerRunning) {
             OnReadTimer();
-            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            this_thread::sleep_for(std::chrono::milliseconds(500));
         }
         });
-    displayTimerThread = std::thread([this]() {
+    displayTimerThread = thread([this]() {
         SetThreadName("Display thread");
         while (timerRunning) {
             OnDisplayTimer();
-            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            this_thread::sleep_for(std::chrono::milliseconds(500));
         }
         });
 }
@@ -408,7 +408,7 @@ void ManualCalibrationDialog::readModbusWorker() {
         rc = modbus_read_registers(modbusCtx, 6, 2, refFlow);
         if (rc != -1) {
              memcpy(&localRefFlowValue, refFlow, sizeof(localRefFlowValue));
-             localRefFlowValue = std::round(localRefFlowValue * 1000.0) / 1000.0;
+             localRefFlowValue = round(localRefFlowValue * 1000.0) / 1000.0;
         }
         else {
              localRefFlowValue = 0.0f;
@@ -429,11 +429,11 @@ void ManualCalibrationDialog::dumpDataToFile() {
     if (refData.size() >= DUMP_THRESHOLD) {
         if (dumpFilePath.empty()) {
             // สร้างชื่อไฟล์ dump ชั่วคราว
-            std::ostringstream oss;
+            ostringstream oss;
             oss << "temp_dump_" << SerialNumber << "_" << std::time(nullptr) << ".tmp";
             dumpFilePath = oss.str();
         }
-        std::ofstream dumpFile(dumpFilePath, std::ios::app);
+        std::ofstream dumpFile(dumpFilePath, ios::app);
         if (!dumpFile.is_open()) {
             wxMessageBox("Unable to open dump file for writing.", "Error", wxOK | wxICON_ERROR, this);
             return;

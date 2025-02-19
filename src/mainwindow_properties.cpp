@@ -24,7 +24,6 @@ MyFrame::MyFrame(const wxString &title, const wxPoint &pos, const wxSize &size)
     this->SetSize(this->FromDIP(wxSize(400, 300)));
     this->Center();
 }
-
 void MyFrame::OnResize(wxSizeEvent& event)
 {
     // รับขนาดของหน้าต่าง
@@ -36,7 +35,6 @@ void MyFrame::OnResize(wxSizeEvent& event)
     // ดำเนินการ Resize Event ต่อไป
     event.Skip();
 }
-
 void MyFrame::OnComportSettings(wxCommandEvent& WXUNUSED(event)) {
     ComportSettingsDialog dialog(this);
     dialog.ShowModal();
@@ -80,9 +78,7 @@ void MyFrame::SetupMainMenu() {
     // ตั้งค่า MenuBar ให้กับหน้าต่าง
     SetMenuBar(menuBar);
 }
-
 //----------------------------------------------------------------
-// ฟังก์ชันจัดการคลิกเมนู About
 void MyFrame::OnAboutSoftware(wxCommandEvent& WXUNUSED(event)) {
     wxInitAllImageHandlers(); // เรียกใช้งาน Image Handlers
     wxDialog *aboutDialog = new wxDialog(this, wxID_ANY, "About", wxDefaultPosition, wxSize(350, 400), wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER);
@@ -134,7 +130,6 @@ void MyFrame::OnAboutSoftware(wxCommandEvent& WXUNUSED(event)) {
     aboutDialog->ShowModal();
     aboutDialog->Destroy();
 }
-
 // เริ่มต้นตาราง Event
 wxBEGIN_EVENT_TABLE(MyFrame, wxFrame)
     EVT_MENU(1001, MyFrame::OnAboutSoftware) // เชื่อมเมนู About กับฟังก์ชัน OnAboutSoftware

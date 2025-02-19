@@ -7,27 +7,27 @@ float parseMeaValueStructure(const string& data) {
     // แปลง Hex เป็น Byte Array
     vector<uint8_t> bytes;
     for (size_t i = 0; i < data.size(); i += 2) {
-        uint8_t byte = std::stoi(data.substr(i, 2), nullptr, 16);
+        uint8_t byte = stoi(data.substr(i, 2), nullptr, 16);
         bytes.push_back(byte);
     }
     // ใช้ลำดับไบต์ที่ถูกต้องตาม Big Endian
     // แปลง Byte Array เป็น Float โดยตรง (ไม่ reverse)
     float value;
-    std::memcpy(&value, bytes.data(), sizeof(value));
+    memcpy(&value, bytes.data(), sizeof(value));
     return value;
 }
-uint32_t hexToUint32(const std::string& hexStr) {
+uint32_t hexToUint32(const string& hexStr) {
     // ตรวจสอบให้แน่ใจว่า hexStr มีความยาว 8 ตัวอักษร (4 ไบต์)
     if (hexStr.length() != 8) {
-        throw std::invalid_argument("Invalid hex length");
+        throw invalid_argument("Invalid hex length");
     }
     // สลับไบต์จาก Big Endian เป็น Little Endian
-    std::string reorderedHex = { hexStr[6], hexStr[7], hexStr[4], hexStr[5],
+    string reorderedHex = { hexStr[6], hexStr[7], hexStr[4], hexStr[5],
                                          hexStr[2], hexStr[3], hexStr[0], hexStr[1] };
     // แปลงค่า Hex เป็น uint32_t
     uint32_t result;
-    std::stringstream ss;
-    ss << std::hex << reorderedHex;
+    stringstream ss;
+    ss << hex << reorderedHex;
     ss >> result;
     return result;
 }
@@ -41,7 +41,7 @@ uint32_t sendRequestSerialNumber(serial_port& serial) {
         read(serial, buffer(responseBuffer));
         // แสดงผลข้อมูลที่ได้รับ
         if (!responseBuffer.empty()) {
-            std::ostringstream trimmedHex;
+            ostringstream trimmedHex;
             for (size_t i = 3; i <= 6; ++i) {
                 trimmedHex << hex << setfill('0') << setw(2) << (int)responseBuffer[i];
             }
@@ -65,7 +65,7 @@ float sendAndReceiveBetweenPorts(serial_port& serial) {
         read(serial, buffer(responseBuffer));
         // แสดงผลข้อมูลที่ได้รับ
         if (!responseBuffer.empty()) {
-            std::ostringstream trimmedHex;
+            ostringstream trimmedHex;
             for (size_t i = 3; i < responseBuffer.size() - 5; ++i) {
                 trimmedHex << hex << setfill('0') << setw(2) << (int)responseBuffer[i];
             }
@@ -78,7 +78,7 @@ float sendAndReceiveBetweenPorts(serial_port& serial) {
         }
 
     }
-    catch (const std::exception& e) {
+    catch (const exception& e) {
         return 0;
     }
 }
