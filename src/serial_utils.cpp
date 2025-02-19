@@ -70,7 +70,7 @@ float sendAndReceiveBetweenPorts(serial_port& serial) {
                 trimmedHex << hex << setfill('0') << setw(2) << (int)responseBuffer[i];
             }
             float parsedValue = parseMeaValueStructure(trimmedHex.str());
-            parsedValue = std::round(parsedValue * 1000.0f) / 1000.0f;
+            parsedValue = round(parsedValue * 1000.0f) / 1000.0f;
             return parsedValue;
         }
         else {

@@ -229,17 +229,24 @@ void AutomateCheckpointDialog::OnUpdateFlowTimer(wxTimerEvent& event) {
         updateTimer.Stop();
         return;
     }
-    double act_flow = setpoint[currentRowIndex];
-    double ref_flow = setpoint[currentRowIndex];
+    TuneFlowByPID(setpoint[currentRowIndex]);
+	double act_flow = avgActFlowdata();
+	double ref_flow = avgRefFlowdata();
     double error = ((act_flow - ref_flow) / ref_flow) * 100 ;
-    
+	//-----------------------------------------------------------------------------------
+    ostringstream refstream;
+    refstream << fixed << setprecision(3) << error;
+    string refFlowStr = refstream.str();
+    ostringstream actstream;
+    actstream << fixed << setprecision(3) << error;
+    string actFlowStr = actstream.str();
     ostringstream stream;
     stream << fixed << setprecision(3) << error;
     string errorStr = stream.str();
-
+	//-----------------------------------------------------------------------------------
     if (currentRowIndex < actFlowCells.size()) {
-        actFlowCells[currentRowIndex]->SetLabel(to_string(setpoint[currentRowIndex]));
-        refFlowCells[currentRowIndex]->SetLabel(to_string(setpoint[currentRowIndex]));
+        actFlowCells[currentRowIndex]->SetLabel(refFlowStr);
+        refFlowCells[currentRowIndex]->SetLabel(actFlowStr);
         errorCells[currentRowIndex]->SetLabel(errorStr);
     }
     grid->Layout();
@@ -252,11 +259,11 @@ void AutomateCheckpointDialog::StartUpdatingFlowValues(wxCommandEvent& event) {
     updateTimer.Start(1000);  // เรียก event ทุก 1 วินาที
 }
 //----------------------------------------------------------------------------------------------------------------------
-double AutomateCheckpointDialog::readActFlowdata() {
+double AutomateCheckpointDialog::avgActFlowdata() {
 	double actFlowValue = 0.0;
 	double avgActFlow = 0.0;
 	vector<double> BufferactFlowValue;
-	for (int i = 0; i < 24; i++) {
+	while (BufferactFlowValue.size() < 24) {
 		actFlowValue = sendAndReceiveBetweenPorts(BLECtx);
 		BufferactFlowValue.push_back(actFlowValue);
 	}
@@ -266,13 +273,13 @@ double AutomateCheckpointDialog::readActFlowdata() {
 	avgActFlow = avgActFlow / BufferactFlowValue.size();
 	return avgActFlow;
 }
-double AutomateCheckpointDialog::readRefFlowdata() {
+double AutomateCheckpointDialog::avgRefFlowdata() {
 	double refFlowValue = 0.0;
 	double avgRefFlow = 0.0;
 	vector<double> BufferrefFlowValue;
-    for (int i; i < 24; i++) {
+    while(BufferrefFlowValue.size() < 24) {
         rc = modbus_read_registers(modbusCtx, 6, 2, refFlow);
-        while (rc != -1) {
+        if (rc != -1) {
             memcpy(&refFlowValue, refFlow, sizeof(refFlowValue));
 			refFlowValue = round(refFlowValue * 1000.0) / 1000.0;
         }
@@ -284,6 +291,22 @@ double AutomateCheckpointDialog::readRefFlowdata() {
 	avgRefFlow = avgRefFlow / BufferrefFlowValue.size();
 	return avgRefFlow;
 }
+//----------------------------------------------------------------------------------------------------------------------
+void AutomateCheckpointDialog::ReadrefFlow() {
+	rc = modbus_read_registers(modbusCtx, 6, 2, refFlow);
+	if (rc != -1) {
+		memcpy(&NRefFlow, refFlow, sizeof(NRefFlow));
+        NRefFlow = round(NRefFlow * 1000.0) / 1000.0;
+	}
+}
+void AutomateCheckpointDialog::TuneFlowByPID(int setpoint) {
+    do {
+        ReadrefFlow();
+        float PID_output = calculatePID(setpoint, NRefFlow);
+        set_current(serialCtx, PID_output);
+    } while (NRefFlow < setpoint);
+}
+//----------------------------------------------------------------------------------------------------------------------
 wxBEGIN_EVENT_TABLE(AutomateCheckpointDialog, wxDialog)
     EVT_BUTTON(1020, AutomateCheckpointDialog::StartUpdatingFlowValues)
     EVT_BUTTON(1021, AutomateCheckpointDialog::OnLoadFile)
