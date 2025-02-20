@@ -59,18 +59,29 @@ public:
     //---------------------------------------------------------------------------------
     void OnUpdateFlowTimer(wxTimerEvent& event);
     void StartUpdatingFlowValues(wxCommandEvent& event);
+	void StopUpdatingFlowValues(wxCommandEvent& event);
 	void TuneFlowByPID(int setpoint);
     //----------------------------------------------------------------------------------
     double avgActFlowdata();
-    //------------------------------------------------------------------------------------
     double avgRefFlowdata();
+    //------------------------------------------------------------------------------------
     //------------------------------------------------------------------------------------
     void ReadrefFlow();
     //------------------------------------------------------------------------------------
+    void OnExportLog(wxCommandEvent& event);
+    void ExportDataToCSV(const wxString& filePath);
+    string GetCurrentTime();
+    string GetCurrentDate();
 private:
     wxDECLARE_EVENT_TABLE();
     //-----------------------------------------------------------------------------------
 	float NRefFlow = 0;
+    //----------------------------------------------------------------------------------
+    vector<double> BufferactFlowValue;
+	vector<double> BufferrefFlowValue;
+    //----------------------------------------------------------------------------------
+    vector<double> FullrefBuffer;
+	vector<double> FullactBuffer;
     //-----------------------------------------------------------------------------------
     const double Kp = 9.03223474630576e-4; // for current control
     const double Ki = 0.0271542857142857;

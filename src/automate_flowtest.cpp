@@ -26,9 +26,9 @@ AutomateCheckpointDialog::AutomateCheckpointDialog(wxWindow* parent)
     // ปุ่ม
     hbox = new wxBoxSizer(wxHORIZONTAL);
     loadFileBtn = new wxButton(panel, 1021, "Load File");
-    exportBtn = new wxButton(panel, wxID_ANY, "Export Log");
+    exportBtn = new wxButton(panel, 1023, "Export Log");
     startBtn = new wxButton(panel, 1020, "Start");
-    stopBtn = new wxButton(panel, wxID_ANY, "Stop");
+    stopBtn = new wxButton(panel, 1024, "Stop");
     cancelBtn = new wxButton(panel, wxID_CANCEL, "Cancel");
     // ปุ่ม Load File และ Export Log อยู่ใน row เดียวกัน
     hbox->Add(loadFileBtn, 0, wxRIGHT, 10);
@@ -249,6 +249,10 @@ void AutomateCheckpointDialog::OnUpdateFlowTimer(wxTimerEvent& event) {
         refFlowCells[currentRowIndex]->SetLabel(actFlowStr);
         errorCells[currentRowIndex]->SetLabel(errorStr);
     }
+	//-----------------------------------------------------------------------------------
+	// Clear the buffers for next checkpoint
+    BufferactFlowValue.clear();
+    BufferrefFlowValue.clear();
     grid->Layout();
     grid->GetContainingWindow()->Layout();
     currentRowIndex++;
@@ -258,14 +262,17 @@ void AutomateCheckpointDialog::StartUpdatingFlowValues(wxCommandEvent& event) {
     updateTimer.SetOwner(this,1022);
     updateTimer.Start(1000);  // เรียก event ทุก 1 วินาที
 }
+void AutomateCheckpointDialog::StopUpdatingFlowValues(wxCommandEvent& event) {
+	updateTimer.Stop();
+}
 //----------------------------------------------------------------------------------------------------------------------
 double AutomateCheckpointDialog::avgActFlowdata() {
 	double actFlowValue = 0.0;
 	double avgActFlow = 0.0;
-	vector<double> BufferactFlowValue;
 	while (BufferactFlowValue.size() < 24) {
 		actFlowValue = sendAndReceiveBetweenPorts(BLECtx);
 		BufferactFlowValue.push_back(actFlowValue);
+		FullactBuffer.push_back(actFlowValue);
 	}
 	for (int i = 0; i < BufferactFlowValue.size(); i++) {
 		avgActFlow += BufferactFlowValue[i];
@@ -275,8 +282,7 @@ double AutomateCheckpointDialog::avgActFlowdata() {
 }
 double AutomateCheckpointDialog::avgRefFlowdata() {
 	double refFlowValue = 0.0;
-	double avgRefFlow = 0.0;
-	vector<double> BufferrefFlowValue;
+    double avgRefFlow = 0.0;
     while(BufferrefFlowValue.size() < 24) {
         rc = modbus_read_registers(modbusCtx, 6, 2, refFlow);
         if (rc != -1) {
@@ -284,6 +290,7 @@ double AutomateCheckpointDialog::avgRefFlowdata() {
 			refFlowValue = round(refFlowValue * 1000.0) / 1000.0;
         }
 		BufferrefFlowValue.push_back(refFlowValue);
+		FullrefBuffer.push_back(refFlowValue);
     }
     for (int i = 0; i < BufferrefFlowValue.size(); i++) {
 		avgRefFlow += BufferrefFlowValue[i];
@@ -300,15 +307,85 @@ void AutomateCheckpointDialog::ReadrefFlow() {
 	}
 }
 void AutomateCheckpointDialog::TuneFlowByPID(int setpoint) {
+    double error = 0;
     do {
         ReadrefFlow();
-        float PID_output = calculatePID(setpoint, NRefFlow);
+        double PID_output = calculatePID(setpoint, NRefFlow);
         set_current(serialCtx, PID_output);
-    } while (NRefFlow < setpoint);
+		error = abs(setpoint - NRefFlow);
+    } while (error <= 0.1);
+}
+//----------------------------------------------------------------------------------------------------------------------
+void AutomateCheckpointDialog::OnExportLog(wxCommandEvent& event) {
+    wxFileDialog saveFileDialog(this, "Save CSV file", "", "",
+        "CSV files (*.csv)|*.csv", wxFD_SAVE | wxFD_OVERWRITE_PROMPT);
+    if (saveFileDialog.ShowModal() == wxID_CANCEL)
+        return;
+    ExportDataToCSV(saveFileDialog.GetPath());
+}
+string AutomateCheckpointDialog::GetCurrentTime() {
+    auto now = std::chrono::system_clock::now();
+    time_t current_time = std::chrono::system_clock::to_time_t(now);
+    tm* timeinfo = localtime(&current_time);
+    char buffer[9];
+    strftime(buffer, sizeof(buffer), "%I:%M:%S", timeinfo);
+    string meridiem = (timeinfo->tm_hour >= 12) ? " PM" : " AM";
+    return string(buffer) + meridiem;
+}
+string AutomateCheckpointDialog::GetCurrentDate() {
+    auto now = std::chrono::system_clock::now();
+    time_t current_time = std::chrono::system_clock::to_time_t(now);
+    tm* timeinfo = localtime(&current_time);
+    char buffer[12];
+    strftime(buffer, sizeof(buffer), "%d %b. %Y", timeinfo);
+    return string(buffer);
+}
+void AutomateCheckpointDialog::ExportDataToCSV(const wxString& filePath) {
+    ofstream file(filePath.ToStdString());
+    if (!file.is_open()) {
+        wxMessageBox("Failed to create CSV file", "Error", wxOK | wxICON_ERROR);
+        return;
+    }
+    // Write header with current time and date
+    file << "Time:," << GetCurrentTime() << "," << endl;
+    file << "Date:," << GetCurrentDate() << "," << endl;
+
+    // For each checkpoint
+    size_t index = 0;
+    for (size_t checkPoint = 0; checkPoint < setpoint.size(); checkPoint++) {
+        file << "Check Point," << checkPoint + 1 << "," << endl;
+        file << "Flow," << setpoint[checkPoint] << " m3/h," << endl;
+        file << "Index,Ref. Flow (m3/h),Act. Flow (m3/h)" << endl;
+
+        double sumActFlow = 0.0;
+        int count = 0;
+        // Write 24 values for each checkpoint
+        for (int i = 0; i < 24; i++) {
+            if (index < FullactBuffer.size() && index < FullrefBuffer.size()) {
+                file << i + 1 << "," << fixed << setprecision(4) << FullrefBuffer[index] << "," << FullactBuffer[index] << endl;
+                sumActFlow += FullactBuffer[index];
+                count++;
+                index++;
+            }
+        }
+        // Calculate and write actual flow average
+        if (count > 0) {
+            double avgAct = sumActFlow / count;
+            file << ",Act. Avg," << fixed << setprecision(4) << avgAct << endl;
+        }
+    }
+
+    // Clear buffers after exporting
+    FullactBuffer.clear();
+    FullrefBuffer.clear();
+    file.close();
+    wxMessageBox("Data exported successfully", "Success", wxOK | wxICON_INFORMATION);
 }
 //----------------------------------------------------------------------------------------------------------------------
 wxBEGIN_EVENT_TABLE(AutomateCheckpointDialog, wxDialog)
     EVT_BUTTON(1020, AutomateCheckpointDialog::StartUpdatingFlowValues)
     EVT_BUTTON(1021, AutomateCheckpointDialog::OnLoadFile)
+	EVT_BUTTON(1023, AutomateCheckpointDialog::OnExportLog)
+	EVT_BUTTON(1024, AutomateCheckpointDialog::StopUpdatingFlowValues)
     EVT_TIMER(1022, AutomateCheckpointDialog::OnUpdateFlowTimer)
 END_EVENT_TABLE()
